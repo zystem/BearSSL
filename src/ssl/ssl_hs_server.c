@@ -77,6 +77,25 @@ void br_ssl_hs_server_run(void *t0ctx);
  */
 #define ENG  ((br_ssl_engine_context *)(void *)((unsigned char *)t0ctx - offsetof(br_ssl_engine_context, cpu)))
 
+/*
+ * When the "tee" is on (TLS 1.3 ServerHello: a HelloRetryRequest must be
+ * hashed again later), the handshake bytes that are read are also copied
+ * in a buffer. A tee value of 2 means that the buffer was too small.
+ */
+static void
+tee_bytes(br_ssl_engine_context *eng, const unsigned char *p, size_t n)
+{
+	if (eng->tls13_tee != 1) {
+		return;
+	}
+	if ((size_t)eng->tls13_tee_len + n > sizeof eng->tls13_tee_buf) {
+		eng->tls13_tee = 2;
+		return;
+	}
+	memcpy(eng->tls13_tee_buf + eng->tls13_tee_len, p, n);
+	eng->tls13_tee_len += (uint16_t)n;
+}
+
 
 
 
@@ -1583,6 +1602,7 @@ br_ssl_hs_server_run(void *t0ctx)
 		memcpy((unsigned char *)ENG + addr, ENG->hbuf_in, clen);
 		if (ENG->record_type_in == BR_SSL_HANDSHAKE) {
 			br_multihash_update(&ENG->mhash, ENG->hbuf_in, clen);
+			tee_bytes(ENG, ENG->hbuf_in, clen);
 		}
 		T0_PUSH(addr + (uint32_t)clen);
 		T0_PUSH(len - (uint32_t)clen);
@@ -1601,6 +1621,7 @@ br_ssl_hs_server_run(void *t0ctx)
 		x = *ENG->hbuf_in ++;
 		if (ENG->record_type_in == BR_SSL_HANDSHAKE) {
 			br_multihash_update(&ENG->mhash, &x, 1);
+			tee_bytes(ENG, &x, 1);
 		}
 		T0_PUSH(x);
 		ENG->hlen_in --;

@@ -47,21 +47,15 @@ suite_hash(br_ssl_engine_context *cc, int *hash_id)
 
 /* see inner.h */
 size_t
-br_ssl_engine_tls13_keygen(br_ssl_engine_context *cc)
+br_ssl_engine_tls13_keygen_group(br_ssl_engine_context *cc, int curve)
 {
-	int curve;
 	const unsigned char *order;
 	size_t olen, glen;
 	unsigned char mask;
 
-	if (cc->iec == NULL) {
-		return 0;
-	}
-	if (cc->iec->supported_curves & ((uint32_t)1 << CURVE_X25519)) {
-		curve = CURVE_X25519;
-	} else if (cc->iec->supported_curves & ((uint32_t)1 << CURVE_P256)) {
-		curve = CURVE_P256;
-	} else {
+	if (cc->iec == NULL || curve < 0 || curve > 31
+		|| (cc->iec->supported_curves & ((uint32_t)1 << curve)) == 0)
+	{
 		return 0;
 	}
 
@@ -89,6 +83,82 @@ br_ssl_engine_tls13_keygen(br_ssl_engine_context *cc)
 	cc->tls13_pub_len = (unsigned char)glen;
 	cc->tls13_curve = (unsigned char)curve;
 	return glen;
+}
+
+/* see inner.h */
+size_t
+br_ssl_engine_tls13_keygen(br_ssl_engine_context *cc)
+{
+	if (cc->iec == NULL) {
+		return 0;
+	}
+	if (cc->iec->supported_curves & ((uint32_t)1 << CURVE_X25519)) {
+		return br_ssl_engine_tls13_keygen_group(cc, CURVE_X25519);
+	} else {
+		return br_ssl_engine_tls13_keygen_group(cc, CURVE_P256);
+	}
+}
+
+/* see inner.h */
+void
+br_ssl_engine_tls13_save_ch1(br_ssl_engine_context *cc)
+{
+	memset(cc->tls13_ch1_256, 0, sizeof cc->tls13_ch1_256);
+	memset(cc->tls13_ch1_384, 0, sizeof cc->tls13_ch1_384);
+	br_multihash_out(&cc->mhash, br_sha256_ID, cc->tls13_ch1_256);
+	br_multihash_out(&cc->mhash, br_sha384_ID, cc->tls13_ch1_384);
+}
+
+/* see inner.h */
+int
+br_ssl_engine_tls13_hrr_restart(br_ssl_engine_context *cc)
+{
+	const br_hash_class *dig;
+	int hash_id;
+	unsigned char hdr[4];
+	size_t hlen;
+	const unsigned char *h1;
+
+	/*
+	 * The group must be one that we support, and not the one of the
+	 * share that we already sent.
+	 */
+	if (cc->tls13_hrr_group != 0) {
+		if (cc->tls13_hrr_group == cc->tls13_curve) {
+			return BR_ERR_BAD_PARAM;
+		}
+		if (cc->tls13_hrr_group > 31 || cc->iec == NULL
+			|| (cc->iec->supported_curves
+				& ((uint32_t)1 << cc->tls13_hrr_group)) == 0)
+		{
+			return BR_ERR_INVALID_ALGORITHM;
+		}
+	}
+	if (cc->tls13_tee != 1) {
+		return BR_ERR_LIMIT_EXCEEDED;
+	}
+	dig = suite_hash(cc, &hash_id);
+	if (dig == NULL) {
+		return BR_ERR_BAD_CIPHER_SUITE;
+	}
+	hlen = br_digest_size(dig);
+	h1 = (hash_id == br_sha384_ID) ? cc->tls13_ch1_384 : cc->tls13_ch1_256;
+
+	/*
+	 * New transcript: message_hash (type 254) with the hash of the first
+	 * ClientHello, then the HelloRetryRequest (header included).
+	 */
+	hdr[0] = 254;
+	hdr[1] = 0;
+	hdr[2] = 0;
+	hdr[3] = (unsigned char)hlen;
+	br_multihash_init(&cc->mhash);
+	br_multihash_update(&cc->mhash, hdr, sizeof hdr);
+	br_multihash_update(&cc->mhash, h1, hlen);
+	br_multihash_update(&cc->mhash, cc->tls13_tee_buf, cc->tls13_tee_len);
+	cc->tls13_tee = 0;
+	cc->tls13_tee_len = 0;
+	return 0;
 }
 
 /* see inner.h */

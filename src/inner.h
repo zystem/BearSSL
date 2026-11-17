@@ -2337,6 +2337,20 @@ int br_ssl_engine_tls13_verify_cv(br_ssl_engine_context *cc,
 int br_ssl_engine_tls13_key_update(br_ssl_engine_context *cc, int for_input);
 
 /*
+ * HelloRetryRequest support.
+ * keygen_group: like keygen, for a given group (curve identifier).
+ * save_ch1: save the hash (SHA-256 and SHA-384) of the transcript, which
+ *   is the first ClientHello.
+ * hrr_restart: after a HelloRetryRequest (its raw bytes are in the tee
+ *   buffer, the suite in the session parameters), check the requested
+ *   group, and replace the transcript with message_hash(ClientHello1)
+ *   followed by the HelloRetryRequest. Returns 0 or a BR_ERR_* code.
+ */
+size_t br_ssl_engine_tls13_keygen_group(br_ssl_engine_context *cc, int curve);
+void br_ssl_engine_tls13_save_ch1(br_ssl_engine_context *cc);
+int br_ssl_engine_tls13_hrr_restart(br_ssl_engine_context *cc);
+
+/*
  * Switch to TLS 1.3 record protection, for incoming ('for_input' non-zero)
  * or outgoing records, with the keys and IV derived from a traffic secret.
  *    cc          the engine context

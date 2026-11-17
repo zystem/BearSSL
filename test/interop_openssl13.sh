@@ -24,10 +24,13 @@ mk p384 ec -pkeyopt ec_paramgen_curve:secp384r1
 mk rsa rsa:2048
 head -c 200000 /dev/urandom | base64 -w0 | head -c 200000 > "$DIR/big.txt"
 
-# case NAME CERT SUITE ALPN
+# case NAME CERT SUITE ALPN SERVER-GROUPS
 case_() {
+	grp=""
+	[ -n "$5" ] && grp="-groups $5"
 	( cd "$DIR" && exec openssl s_server -accept $PORT -cert $2.crt \
-		-key $2.key -WWW -quiet -alpn h2,http/1.1 >srv.log 2>&1 ) &
+		-key $2.key -WWW -quiet -alpn h2,http/1.1 $grp \
+		>srv.log 2>&1 ) &
 	SRV=$!
 	sleep 1
 	opts="-vmax tls13 -sni localhost -CA $DIR/$2.crt"
@@ -59,4 +62,8 @@ case_ "ecdsa-p384 aes128" p384 TLS13_AES_128_GCM_SHA256 ""
 case_ "rsa-pss aes128" rsa TLS13_AES_128_GCM_SHA256 ""
 case_ "rsa-pss aes256" rsa TLS13_AES_256_GCM_SHA384 ""
 case_ "alpn h2" ec "" h2
+# HelloRetryRequest: the server accepts neither of our first share (X25519)
+case_ "hello retry P-256" ec "" "" P-256
+case_ "hello retry P-384" ec "" "" P-384
+case_ "hello retry P-521" ec "" "" P-521
 exit $fail

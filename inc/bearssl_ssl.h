@@ -1044,7 +1044,7 @@ typedef struct {
 	 * scalar, public point, curve), key schedule, traffic secrets, and
 	 * the transcript hash snapshot used by CertificateVerify.
 	 */
-	unsigned char tls13_priv[32];
+	unsigned char tls13_priv[66];
 	unsigned char tls13_pub[133];
 	unsigned char tls13_pub_len;
 	unsigned char tls13_curve;
@@ -1055,6 +1055,24 @@ typedef struct {
 	unsigned char tls13_cap[48];
 	unsigned char tls13_sap[48];
 	unsigned char tls13_th[48];
+
+	/*
+	 * HelloRetryRequest state: 'tls13_hrr' is 0 (none), 1 (a HelloRetryRequest
+	 * was received) or 2 (ClientHello sent again); the group asked for
+	 * (0 if none), the suite, the cookie (at most 255 bytes), the hash of
+	 * the first ClientHello for each suite hash, and the raw bytes of the
+	 * server message being read (tee: 0 off, 1 on, 2 overflow).
+	 */
+	unsigned char tls13_hrr;
+	unsigned char tls13_hrr_group;
+	uint16_t tls13_hrr_suite;
+	unsigned char tls13_cookie_len;
+	unsigned char tls13_cookie[255];
+	unsigned char tls13_ch1_256[32];
+	unsigned char tls13_ch1_384[48];
+	unsigned char tls13_tee;
+	uint16_t tls13_tee_len;
+	unsigned char tls13_tee_buf[400];
 
 	unsigned char *hbuf_in, *hbuf_out, *saved_hbuf_out;
 	size_t hlen_in, hlen_out;

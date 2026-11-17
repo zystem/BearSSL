@@ -36,6 +36,25 @@ preamble {
  */
 #define ENG  ((br_ssl_engine_context *)(void *)((unsigned char *)t0ctx - offsetof(br_ssl_engine_context, cpu)))
 
+/*
+ * When the "tee" is on (TLS 1.3 ServerHello: a HelloRetryRequest must be
+ * hashed again later), the handshake bytes that are read are also copied
+ * in a buffer. A tee value of 2 means that the buffer was too small.
+ */
+static void
+tee_bytes(br_ssl_engine_context *eng, const unsigned char *p, size_t n)
+{
+	if (eng->tls13_tee != 1) {
+		return;
+	}
+	if ((size_t)eng->tls13_tee_len + n > sizeof eng->tls13_tee_buf) {
+		eng->tls13_tee = 2;
+		return;
+	}
+	memcpy(eng->tls13_tee_buf + eng->tls13_tee_len, p, n);
+	eng->tls13_tee_len += (uint16_t)n;
+}
+
 }
 
 \ IMPLEMENTATION NOTES
@@ -179,6 +198,11 @@ addr-eng: selected_protocol
 addr-eng: tls13_pub
 addr-eng: tls13_pub_len
 addr-eng: tls13_curve
+addr-eng: tls13_hrr
+addr-eng: tls13_hrr_group
+addr-eng: tls13_hrr_suite
+addr-eng: tls13_cookie_len
+addr-eng: tls13_cookie
 
 \ Similar to 'addr-eng:', for fields in the 'session' substructure.
 : addr-session-field:
@@ -286,6 +310,30 @@ cc: tls13-switch ( for-input app -- ) {
 		br_ssl_engine_fail(ENG, BR_ERR_BAD_PARAM);
 		T0_CO();
 	}
+}
+
+\ Switch the tee on (non-zero) or off, and empty it.
+cc: tls13-tee ( on -- ) {
+	ENG->tls13_tee = (T0_POPi() != 0);
+	ENG->tls13_tee_len = 0;
+}
+
+\ Generate the key share for a given group (curve identifier); returns the
+\ public point length (0 on failure).
+cc: tls13-keygen-group ( group -- len ) {
+	int group = T0_POPi();
+
+	T0_PUSH((uint32_t)br_ssl_engine_tls13_keygen_group(ENG, group));
+}
+
+\ Save the hash of the first ClientHello.
+cc: tls13-save-ch1 ( -- ) {
+	br_ssl_engine_tls13_save_ch1(ENG);
+}
+
+\ Restart the transcript after a HelloRetryRequest; returns 0 or an error.
+cc: tls13-hrr-restart ( -- err ) {
+	T0_PUSH((uint32_t)br_ssl_engine_tls13_hrr_restart(ENG));
 }
 
 \ Save the transcript hash (for CertificateVerify and Finished).
@@ -587,6 +635,7 @@ cc: read8-native ( -- x ) {
 		x = *ENG->hbuf_in ++;
 		if (ENG->record_type_in == BR_SSL_HANDSHAKE) {
 			br_multihash_update(&ENG->mhash, &x, 1);
+			tee_bytes(ENG, &x, 1);
 		}
 		T0_PUSH(x);
 		ENG->hlen_in --;
@@ -616,6 +665,7 @@ cc: read-chunk-native ( addr len -- addr len ) {
 		memcpy((unsigned char *)ENG + addr, ENG->hbuf_in, clen);
 		if (ENG->record_type_in == BR_SSL_HANDSHAKE) {
 			br_multihash_update(&ENG->mhash, ENG->hbuf_in, clen);
+			tee_bytes(ENG, ENG->hbuf_in, clen);
 		}
 		T0_PUSH(addr + (uint32_t)clen);
 		T0_PUSH(len - (uint32_t)clen);

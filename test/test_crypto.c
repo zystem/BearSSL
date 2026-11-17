@@ -10211,6 +10211,353 @@ test_TLS13_REPLAY(void)
 	fflush(stdout);
 }
 
+static const struct {
+	const char *ch1;
+	const char *hrr;
+	const char *ch2;
+	const char *hrrrec;
+	const char *shrec;
+	const char *flightrec;
+	const char *cfinrec;
+	const char *cpriv;
+	const char *cpub;
+	const char *cert;
+} test13hrr_vec = {
+	"010000b00303b0b1c5a5aa37c5919f2ed1d5c6fff7fcb7849716945a2b8cee9258a346677b6f000006130113031302010000810000000b0009000006736572766572ff01000100000a00080006001d00170018003300260024001d0020e8e8e3f3b93a25ed97a14a7dcacb8a272c6288e585c6484d05262fcad062ad1f002b0003020304000d0020001e040305030603020308040805080604010501060102010402050206020202002d00020101001c00024001",
+	"020000ac0303cf21ad74e59a6111be1d8c021e65b891c2a211167abb8c5e079e09e2c8a8339c001301000084003300020017002c0074007271dcd04bb88bc3189119398a00000000eefafc76c146b823b096f8aacad365dd0030953f4edf625636e5f21bb2e23fcc654b1b5b40318d10d137abcbb87574e36e8a1f025f7dfa5d6e50781b5eda4aa15b0c8be778257d16aa3030e9e7841dd9e4c0342267e8ca0caf571fb2b7cff0f934b0002b00020304",
+	"010001fc0303b0b1c5a5aa37c5919f2ed1d5c6fff7fcb7849716945a2b8cee9258a346677b6f000006130113031302010001cd0000000b0009000006736572766572ff01000100000a00080006001d001700180033004700450017004104a6da7392ec591e17abfd535964b99894d13befb221b3def2ebe3830eac8f0151812677c4d6d2237e85cf01d6910cfb83954e76ba7352830534159897e8065780002b0003020304000d0020001e040305030603020308040805080604010501060102010402050206020202002c0074007271dcd04bb88bc3189119398a00000000eefafc76c146b823b096f8aacad365dd0030953f4edf625636e5f21bb2e23fcc654b1b5b40318d10d137abcbb87574e36e8a1f025f7dfa5d6e50781b5eda4aa15b0c8be778257d16aa3030e9e7841dd9e4c0342267e8ca0caf571fb2b7cff0f934b0002d00020101001c00024001001500af00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+	"16030300b0020000ac0303cf21ad74e59a6111be1d8c021e65b891c2a211167abb8c5e079e09e2c8a8339c001301000084003300020017002c0074007271dcd04bb88bc3189119398a00000000eefafc76c146b823b096f8aacad365dd0030953f4edf625636e5f21bb2e23fcc654b1b5b40318d10d137abcbb87574e36e8a1f025f7dfa5d6e50781b5eda4aa15b0c8be778257d16aa3030e9e7841dd9e4c0342267e8ca0caf571fb2b7cff0f934b0002b00020304",
+	"160303007b020000770303bb341d847fd789c47c387172dc0c9bf147fccacb5043d86ca4c598d3ff571b9800130100004f003300450017004104583e054b7a66672ae020ad9d2686fcc85b5ad41a134a0f03ee72b893052bd85b4c8de6776f5b04ac07d83540eab3e3d9c547bc6528c4317d294686093a6cad7d002b00020304",
+	"170303029699bee20baf5b7fc727bfab6223928a381e6d0cf9c4da653f9d2a7b23f7de11cce842d5cf75631763450ffb8b0cc1d238e658af7a12adc86243114ab14a1da2fae42621ce483fb6242eabfaad52566b02b31d2eddedefeb80e66a9900d5f973b40c4fdf74719ecf1b68d7f9c3b6ceb903ca13dd1bb8f8187ae33417e1d152522c5822a1a03ad52c838c55953d610222874cce8e1790b229a2aa0b53c8d377ee720182951dc6181dc5d90bd1f0105ed1e84aa5f75957c6661897079e5ea5007449e3197bdc7c9beeedddeafdd844afa5c315ecfe65e576afe909812880620ec7048b42d7f5c78d76f299d6d82534bdd8f512febc0ed3814aca470cd8000d3e1cb9962b052fbb950df683a52c2ba77ed3713b122937a6e5170964e2ab7969dcd980b3db9b458da7603124d6dc005e4d6e04b4d0c4baf3275db827dbba0a6db09672171fc057b3851d7e026841e2978fbd2346bbefdd0376bb1108fe9acc92189f5650aa5e85d8e8c7b67ac510dba003d3d7e16350bb66d45013efd44c9b607c0d318c4c7d1a1f5cbc57e20611804e3787d7b4a4b5f08ed8fd70bdaeade02260b12ab842ef690b4a3ee7911e841b374ecd5ebbbc2a54d047b600336dd7d0c88b4bc10e58ee6cb656de7247fa20d8e91deb84628608cf80615b62e96c1491c7ac3755eb6901405d3474fe1ac79d106a0cee56c2577fc88480f96cb6b8c681b7b68b53c146093908f350888175bdfb0b1e31ad61e30ba0adfe6d223aa03c0783b5001a57587c328a9afcfcfb978d1cd4328f7d9d60530e630befd96c0c816ee20b0100768ae2a6df51fc68f172740a79af11398ee3be1252491fa9c693479e877f94ab7c5f8cad480203e6ab7b87dd71e8a0729113df17f5eee86ce108d1d72007ec1cd13c85a6c149621e77b7d78d805a30f0be030c315e54",
+	"1703030035d74f1923c662fd34137c6f502f3dd2b93d951d1b3bc97e42afe23c31abea92fe91b474999e85e3b791ce252fe8c3e9f939a4120cb2",
+	"ab5473467e19346ceb0a0414e41da21d4d2445bc3025afe97c4e8dc8d513da39",
+	"04a6da7392ec591e17abfd535964b99894d13befb221b3def2ebe3830eac8f0151812677c4d6d2237e85cf01d6910cfb83954e76ba7352830534159897e8065780",
+	"0b0001b9000001b50001b0308201ac30820115a003020102020102300d06092a864886f70d01010b0500300e310c300a06035504031303727361301e170d3136303733303031323335395a170d3236303733303031323335395a300e310c300a0603550403130372736130819f300d06092a864886f70d010101050003818d0030818902818100b4bb498f8279303d980836399b36c6988c0c68de55e1bdb826d3901a2461eafd2de49a91d015abbc9a95137ace6c1af19eaa6af98c7ced43120998e187a80ee0ccb0524b1b018c3e0b63264d449a6d38e22a5fda430846748030530ef0461c8ca9d9efbfae8ea6d1d03e2bd193eff0ab9a8002c47428a6d35a8d88d79f7f1e3f0203010001a31a301830090603551d1304023000300b0603551d0f0404030205a0300d06092a864886f70d01010b05000381810085aad2a0e5b9276b908c65f73a7267170618a54c5f8a7b337d2df7a594365417f2eae8f8a58c8f8172f9319cf36b7fd6c55b80f21a03015156726096fd335e5e67f2dbf102702e608ccae6bec1fc63a42a99be5c3eb7107c3c54e9b9eb2bd5203b1c3b84e0a8b2f759409ba3eac9d91d402dcc0cc8f8961229ac9187b42b4de10000",
+};
+
+static struct {
+	br_ssl_client_context cc;
+	br_x509_minimal_context xc;
+	br_x509_knownkey_context kk;
+	br_x509_decoder_context dc;
+	unsigned char iobuf[BR_SSL_BUFSIZE_BIDI];
+} rpc;
+
+/*
+ * Start a client engine as in TLS13_REPLAY and consume its first
+ * ClientHello. The server key is the one of the certificate of RFC 8448.
+ */
+static br_ssl_engine_context *
+rp_start(const uint16_t *suites, size_t num_suites)
+{
+	unsigned char buf[1024], cert[1024];
+	unsigned char *b;
+	size_t n, clen, len;
+
+	n = hextobin(buf, test13hs_vec.cert);
+	clen = ((size_t)buf[8] << 16) | ((size_t)buf[9] << 8) | buf[10];
+	H13_CHECK(11 + clen <= n && clen <= sizeof cert, "start: cert");
+	memcpy(cert, buf + 11, clen);
+	br_x509_decoder_init(&rpc.dc, 0, 0);
+	br_x509_decoder_push(&rpc.dc, cert, clen);
+	H13_CHECK(br_x509_decoder_last_error(&rpc.dc) == 0, "start: decode");
+	br_x509_knownkey_init_rsa(&rpc.kk,
+		&br_x509_decoder_get_pkey(&rpc.dc)->key.rsa, BR_KEYTYPE_SIGN);
+	br_ssl_client_init_full(&rpc.cc, &rpc.xc, NULL, 0);
+	br_ssl_engine_set_versions(&rpc.cc.eng, BR_TLS12, BR_TLS13);
+	br_ssl_engine_set_suites(&rpc.cc.eng, suites, num_suites);
+	br_ssl_engine_set_x509(&rpc.cc.eng, &rpc.kk.vtable);
+	br_ssl_engine_set_buffer(&rpc.cc.eng, rpc.iobuf, sizeof rpc.iobuf, 1);
+	H13_CHECK(br_ssl_client_reset(&rpc.cc, "server", 0), "start: reset");
+	b = br_ssl_engine_sendrec_buf(&rpc.cc.eng, &len);
+	H13_CHECK(b != NULL && b[0] == 22 && b[5] == 1, "start: ClientHello");
+	br_ssl_engine_sendrec_ack(&rpc.cc.eng, len);
+	return &rpc.cc.eng;
+}
+
+/*
+ * Feed a record (type, 0x0303, then the message) and return the engine
+ * error.
+ */
+static int
+rp_feed_msg(br_ssl_engine_context *eng, const unsigned char *msg, size_t len)
+{
+	unsigned char *b;
+	size_t blen, off;
+	unsigned char rec[600];
+
+	rec[0] = 22;
+	rec[1] = 3;
+	rec[2] = 3;
+	br_enc16be(rec + 3, (unsigned)len);
+	memcpy(rec + 5, msg, len);
+	len += 5;
+	off = 0;
+	while (off < len && br_ssl_engine_last_error(eng) == 0) {
+		size_t clen;
+
+		b = br_ssl_engine_recvrec_buf(eng, &blen);
+		if (b == NULL) {
+			break;
+		}
+		clen = len - off;
+		if (clen > blen) {
+			clen = blen;
+		}
+		memcpy(b, rec + off, clen);
+		br_ssl_engine_recvrec_ack(eng, clen);
+		off += clen;
+	}
+	return br_ssl_engine_last_error(eng);
+}
+
+static const unsigned char rp_hrr_random[32] = {
+	0xCF, 0x21, 0xAD, 0x74, 0xE5, 0x9A, 0x61, 0x11,
+	0xBE, 0x1D, 0x8C, 0x02, 0x1E, 0x65, 0xB8, 0x91,
+	0xC2, 0xA2, 0x11, 0x16, 0x7A, 0xBB, 0x8C, 0x5E,
+	0x07, 0x9E, 0x09, 0xE2, 0xC8, 0xA8, 0x33, 0x9C
+};
+
+/*
+ * Build a HelloRetryRequest. 'group' is 0 for no key_share extension;
+ * 'cookie_len' is 0 for no cookie.
+ */
+static size_t
+rp_make_hrr(unsigned char *m, unsigned group, size_t cookie_len)
+{
+	size_t p, el;
+
+	m[0] = 2;
+	br_enc16be(m + 4, 0x0303);
+	memcpy(m + 6, rp_hrr_random, 32);
+	m[38] = 0;
+	br_enc16be(m + 39, 0x1301);
+	m[41] = 0;
+	p = 44;
+	br_enc16be(m + p, 0x002B);
+	br_enc16be(m + p + 2, 2);
+	br_enc16be(m + p + 4, 0x0304);
+	p += 6;
+	if (group != 0) {
+		br_enc16be(m + p, 0x0033);
+		br_enc16be(m + p + 2, 2);
+		br_enc16be(m + p + 4, group);
+		p += 6;
+	}
+	if (cookie_len != 0) {
+		br_enc16be(m + p, 0x002C);
+		br_enc16be(m + p + 2, (unsigned)(cookie_len + 2));
+		br_enc16be(m + p + 4, (unsigned)cookie_len);
+		memset(m + p + 6, 0x5A, cookie_len);
+		p += 6 + cookie_len;
+	}
+	el = p - 44;
+	br_enc16be(m + 42, (unsigned)el);
+	m[1] = 0;
+	br_enc16be(m + 2, (unsigned)(p - 4));
+	return p;
+}
+
+static const void *
+rp_find(const unsigned char *hay, size_t hlen,
+	const unsigned char *needle, size_t nlen)
+{
+	size_t u;
+
+	for (u = 0; u + nlen <= hlen; u ++) {
+		if (memcmp(hay + u, needle, nlen) == 0) {
+			return hay + u;
+		}
+	}
+	return NULL;
+}
+
+/*
+ * HelloRetryRequest, RFC 8448 section 5: the server asks for P-256 and
+ * sends a cookie. As in TLS13_REPLAY, the RFC ClientHellos replace ours
+ * in the transcript and the RFC key share is installed; the transcript
+ * restart after the HelloRetryRequest is the one of the engine.
+ */
+static void
+test_TLS13_HRR(void)
+{
+	static const uint16_t suites[] = { 0x1301, 0xC02B };
+	br_ssl_engine_context *eng;
+	br_sha256_context sc;
+	unsigned char buf[1024], ref[1024], h1[32], hdr[4], msg[600];
+	unsigned char *b;
+	size_t len, n, i;
+	int err;
+
+	printf("Test TLS 1.3 HelloRetryRequest: ");
+	fflush(stdout);
+
+	/*
+	 * RFC 8448, section 5.
+	 */
+	eng = rp_start(suites, 1);
+	n = hextobin(buf, test13hrr_vec.ch1);
+	br_sha256_init(&sc);
+	br_sha256_update(&sc, buf, n);
+	br_sha256_out(&sc, h1);
+	memcpy(eng->tls13_ch1_256, h1, 32);
+	rp_feed(eng, test13hrr_vec.hrrrec);
+	if (br_ssl_engine_last_error(eng) != 0) {
+		fprintf(stderr, "HRR: engine error %d\n",
+			br_ssl_engine_last_error(eng));
+	}
+	H13_CHECK(br_ssl_engine_last_error(eng) == 0, "hrr: accepted");
+	H13_CHECK(eng->tls13_hrr == 2, "hrr: state");
+	H13_CHECK(eng->tls13_curve == 23 && eng->tls13_pub_len == 65,
+		"hrr: P-256 share");
+
+	/*
+	 * Our second ClientHello has the cookie of the RFC.
+	 */
+	b = br_ssl_engine_sendrec_buf(eng, &len);
+	H13_CHECK(b != NULL && b[0] == 22 && b[5] == 1, "hrr: second ClientHello");
+	n = hextobin(buf, test13hrr_vec.hrr);
+	{
+		/* find the cookie extension in the RFC HelloRetryRequest */
+		size_t p = 4 + 2 + 32 + 1 + buf[38] + 2 + 1;
+		size_t end = p + 2 + br_dec16be(buf + p), ck = 0, cl = 0;
+
+		p += 2;
+		while (p < end) {
+			if (br_dec16be(buf + p) == 0x002C) {
+				ck = p + 6;
+				cl = br_dec16be(buf + p + 4);
+			}
+			p += 4 + br_dec16be(buf + p + 2);
+		}
+		H13_CHECK(cl == 114, "hrr: cookie in the RFC message");
+		H13_CHECK(rp_find(b, len, buf + ck, cl) != NULL,
+			"hrr: cookie sent back");
+	}
+	/*
+	 * The transcript of the engine now is message_hash(ClientHello1),
+	 * the HelloRetryRequest and our second ClientHello: compare it with
+	 * a hash computed here from the RFC messages and our ClientHello.
+	 */
+	{
+		br_sha256_context sc2;
+		unsigned char want[32], got[32], hm[4];
+
+		hm[0] = 254;
+		hm[1] = 0;
+		hm[2] = 0;
+		hm[3] = 32;
+		br_sha256_init(&sc2);
+		br_sha256_update(&sc2, hm, 4);
+		br_sha256_update(&sc2, h1, 32);
+		n = hextobin(ref, test13hrr_vec.hrr);
+		br_sha256_update(&sc2, ref, n);
+		br_sha256_update(&sc2, b + 5, len - 5);
+		br_sha256_out(&sc2, want);
+		br_multihash_out(&eng->mhash, br_sha256_ID, got);
+		H13_CHECK(memcmp(want, got, 32) == 0,
+			"hrr: transcript after the restart");
+	}
+	br_ssl_engine_sendrec_ack(eng, len);
+
+	/*
+	 * Install the RFC key share and the RFC transcript.
+	 */
+	hextobin(eng->tls13_priv, test13hrr_vec.cpriv);
+	hextobin(eng->tls13_pub, test13hrr_vec.cpub);
+	br_multihash_init(&eng->mhash);
+	hdr[0] = 254;
+	hdr[1] = 0;
+	hdr[2] = 0;
+	hdr[3] = 32;
+	br_multihash_update(&eng->mhash, hdr, 4);
+	br_multihash_update(&eng->mhash, h1, 32);
+	h13_add(eng, test13hrr_vec.hrr);
+	h13_add(eng, test13hrr_vec.ch2);
+
+	rp_feed(eng, test13hrr_vec.shrec);
+	H13_CHECK(br_ssl_engine_last_error(eng) == 0, "hrr: ServerHello");
+	rp_feed(eng, test13hrr_vec.flightrec);
+	if (br_ssl_engine_last_error(eng) != 0) {
+		fprintf(stderr, "HRR: engine error %d\n",
+			br_ssl_engine_last_error(eng));
+	}
+	H13_CHECK(br_ssl_engine_last_error(eng) == 0, "hrr: server flight");
+	b = br_ssl_engine_sendrec_buf(eng, &len);
+	n = hextobin(ref, test13hrr_vec.cfinrec);
+	H13_CHECK(b != NULL && len == n && memcmp(b, ref, n) == 0,
+		"hrr: client Finished");
+	H13_CHECK(eng->session.cipher_suite == 0x1301, "hrr: suite");
+
+	/*
+	 * Rejected cases.
+	 */
+	eng = rp_start(suites, 1);
+	n = rp_make_hrr(msg, 29, 0);
+	err = rp_feed_msg(eng, msg, n);
+	H13_CHECK(err == BR_ERR_BAD_PARAM, "hrr: same group as our share");
+
+	eng = rp_start(suites, 1);
+	n = rp_make_hrr(msg, 99, 0);
+	err = rp_feed_msg(eng, msg, n);
+	H13_CHECK(err == BR_ERR_INVALID_ALGORITHM, "hrr: unknown group");
+
+	eng = rp_start(suites, 1);
+	n = rp_make_hrr(msg, 0, 0);
+	err = rp_feed_msg(eng, msg, n);
+	H13_CHECK(err == BR_ERR_BAD_HANDSHAKE, "hrr: asks for nothing");
+
+	eng = rp_start(suites, 1);
+	n = rp_make_hrr(msg, 0, 40);
+	err = rp_feed_msg(eng, msg, n);
+	H13_CHECK(err == 0 && eng->tls13_cookie_len == 40, "hrr: cookie only");
+	b = br_ssl_engine_sendrec_buf(eng, &len);
+	H13_CHECK(b != NULL && eng->tls13_curve == 29, "hrr: cookie only share kept");
+	memset(ref, 0x5A, 40);
+	H13_CHECK(rp_find(b, len, ref, 40) != NULL, "hrr: cookie bytes");
+	br_ssl_engine_sendrec_ack(eng, len);
+	n = rp_make_hrr(msg, 23, 0);
+	err = rp_feed_msg(eng, msg, n);
+	H13_CHECK(err == BR_ERR_UNEXPECTED, "hrr: a second one is refused");
+
+	/*
+	 * A cookie that is too long does not fit.
+	 */
+	eng = rp_start(suites, 1);
+	n = rp_make_hrr(msg, 23, 300);
+	err = rp_feed_msg(eng, msg, n);
+	H13_CHECK(err != 0, "hrr: cookie of 300 bytes");
+
+	/*
+	 * Downgrade sentinels: a TLS 1.2 ServerHello, from a server that
+	 * must have known better.
+	 */
+	for (i = 0; i < 3; i ++) {
+		eng = rp_start(suites, 2);
+		memset(msg, 0, sizeof msg);
+		msg[0] = 2;
+		msg[3] = 38;
+		br_enc16be(msg + 4, 0x0303);
+		memset(msg + 6, 0x11, 32);
+		br_enc16be(msg + 39, 0xC02B);
+		if (i == 1) {
+			memcpy(msg + 6 + 24, "DOWNGRD\x01", 8);
+		} else if (i == 2) {
+			memcpy(msg + 6 + 24, "DOWNGRD\x00", 8);
+		}
+		err = rp_feed_msg(eng, msg, 42);
+		if (i == 0) {
+			H13_CHECK(err == 0, "downgrade: no sentinel accepted");
+		} else {
+			H13_CHECK(err == BR_ERR_BAD_VERSION,
+				"downgrade: sentinel refused");
+		}
+	}
+
+	printf("done.\n");
+	fflush(stdout);
+}
+
 #define STU(x)   { &test_ ## x, #x }
 
 static const struct {
@@ -10231,6 +10578,7 @@ static const struct {
 	STU(TLS13_REC),
 	STU(TLS13_HS),
 	STU(TLS13_REPLAY),
+	STU(TLS13_HRR),
 	STU(SHAKE),
 	STU(HMAC_DRBG),
 	STU(AESCTR_DRBG),

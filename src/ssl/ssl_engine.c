@@ -1244,7 +1244,7 @@ br_ssl_engine_recvrec_ack(br_ssl_engine_context *cc, size_t len)
 	if (buf != NULL) {
 		switch (cc->record_type_in) {
 		case BR_SSL_CHANGE_CIPHER_SPEC:
-			if (cc->tls13_in) {
+			if (cc->tls13_in || cc->tls13_hrr != 0) {
 				/*
 				 * TLS 1.3 compatibility mode: a plaintext
 				 * ChangeCipherSpec record (one byte of
