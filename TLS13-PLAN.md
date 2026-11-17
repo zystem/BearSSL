@@ -43,6 +43,23 @@ Missing: any TLS 1.3 state, RSA-PSS signing, Ed25519, tickets/PSK, a record code
 | 8 | Nim package fork with the patch; `TlsConfig` switch in nim-grpc and CiNim | existing nim-grpc `ttls` tests and the CiNim soak pass |
 | 9 | Documentation (README try-it, reference, changelog, "not independently audited") | try-it commands run in a test |
 
+### Step 3 in parts (started 2026-11-18, branch `tls13-client-hs`)
+
+| Part | Content | State |
+|------|---------|-------|
+| 3a | Engine hooks: per-direction 1.3 codec (`tls13_in`, `tls13_out`, `in_enc`), inner type becomes `record_type_in`, plaintext CCS accepted while input is protected, `br_ssl_engine_switch13()` | **Done 2026-11-18** (7e75e18). Checked: build without warnings; `brssl client` and `brssl server` against OpenSSL 3.0.13 with TLS 1.2 work; `testx509`, `testcrypto all` pass. Not checked: nothing sets the 1.3 flags yet, so the new paths have not run |
+| 3b | Client context state for 1.3 (X25519/P-256 key pair, secrets, transcript snapshots); C helper words for the key share and the key schedule | not started |
+| 3c | T0: ClientHello extensions (supported_versions, key_share, signature_algorithms, supported_groups), `read-ServerHello` fork, 1.3 suite table entries | not started |
+| 3d | T0: EncryptedExtensions, Certificate (1.3 format), CertificateVerify (rsa_pss_rsae_sha256, ecdsa_secp256r1_sha256), Finished, client Finished, application keys | not started |
+| 3e | Gate: RFC 8448 trace replay with fixed randomness; `brssl client` against `openssl s_server -tls1_3` | not started |
+
+Notes found while reading the code (2026-11-18):
+- The engine's multi-hasher already hashes handshake bytes by `record_type_in`/`record_type_out` == 22, and the inner type becomes `record_type_in` after decryption, so it can serve as the TLS 1.3 transcript; snapshots are taken with `br_multihash_out()` before reading CertificateVerify and Finished.
+- Certificate in 1.3 has a request context and per-entry extensions, so `read-Certificate` (common code) needs a 1.3 variant.
+- CertificateVerify needs RSA-PSS verification; the engine only has the PKCS#1 verifier pointer today (`irsavrfy`).
+- The suite table in `ssl_hs_common.t0` has no 1.3 entries; `suite-supported?` rejects them now.
+- Careful: a Python `str.replace` that does not match is silent; one engine edit was lost that way and showed up only as a 1.2 interop failure. Check each edit with `git diff`.
+
 Rough effort (estimate, not measured): client only, steps 1-3: 6-8 weeks. Whole plan to step 8: 3-5 months.
 
 ## Risks
