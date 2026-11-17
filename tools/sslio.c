@@ -450,6 +450,9 @@ run_ssl_engine(br_ssl_engine_context *cc, unsigned long fd, unsigned flags)
 			case BR_TLS12:
 				fprintf(stderr, "TLS 1.2");
 				break;
+			case BR_TLS13:
+				fprintf(stderr, "TLS 1.3");
+				break;
 			default:
 				fprintf(stderr, "unknown (0x%04X)",
 					(unsigned)cc->session.version);

@@ -234,3 +234,91 @@ br_ssl_engine_tls13_check_finished(br_ssl_engine_context *cc, size_t len)
 	}
 	return bad == 0;
 }
+
+/* see inner.h */
+int
+br_ssl_engine_tls13_verify_cv(br_ssl_engine_context *cc,
+	unsigned alg, size_t sig_len)
+{
+	static const char ctx_string[] = "TLS 1.3, server CertificateVerify";
+	const br_x509_class **xc;
+	const br_x509_pkey *pk;
+	const br_hash_class *dig;
+	br_hash_compat_context hc;
+	unsigned char spaces[64], zero, hv[64];
+	int hash_id, is_rsa, curve;
+	size_t hlen;
+
+	switch (alg) {
+	case 0x0403: hash_id = br_sha256_ID; is_rsa = 0; curve = 23; break;
+	case 0x0503: hash_id = br_sha384_ID; is_rsa = 0; curve = 24; break;
+	case 0x0804: hash_id = br_sha256_ID; is_rsa = 1; curve = 0; break;
+	case 0x0805: hash_id = br_sha384_ID; is_rsa = 1; curve = 0; break;
+	default:
+		return BR_ERR_INVALID_ALGORITHM;
+	}
+	dig = br_multihash_getimpl(&cc->mhash, hash_id);
+	if (dig == NULL) {
+		return BR_ERR_INVALID_ALGORITHM;
+	}
+	xc = cc->x509ctx;
+	pk = (*xc)->get_pkey(xc, NULL);
+	if (pk == NULL) {
+		return BR_ERR_BAD_STATE;
+	}
+
+	/*
+	 * Signed content: 64 spaces, the context string, a zero byte and the
+	 * transcript hash.
+	 */
+	memset(spaces, 0x20, sizeof spaces);
+	zero = 0;
+	dig->init(&hc.vtable);
+	dig->update(&hc.vtable, spaces, sizeof spaces);
+	dig->update(&hc.vtable, ctx_string, sizeof ctx_string - 1);
+	dig->update(&hc.vtable, &zero, 1);
+	dig->update(&hc.vtable, cc->tls13_th, cc->tls13_hlen);
+	dig->out(&hc.vtable, hv);
+	hlen = br_digest_size(dig);
+
+	if (is_rsa) {
+		if (pk->key_type != BR_KEYTYPE_RSA || cc->irsapssvrfy == 0) {
+			return BR_ERR_INVALID_ALGORITHM;
+		}
+		if (!cc->irsapssvrfy(cc->pad, sig_len, dig, dig, hv, hlen,
+			&pk->key.rsa))
+		{
+			return BR_ERR_BAD_SIGNATURE;
+		}
+	} else {
+		if (pk->key_type != BR_KEYTYPE_EC
+			|| pk->key.ec.curve != curve
+			|| cc->iecdsa == 0 || cc->iec == NULL)
+		{
+			return BR_ERR_INVALID_ALGORITHM;
+		}
+		if (!cc->iecdsa(cc->iec, hv, hlen, &pk->key.ec,
+			cc->pad, sig_len))
+		{
+			return BR_ERR_BAD_SIGNATURE;
+		}
+	}
+	return 0;
+}
+
+/* see inner.h */
+int
+br_ssl_engine_tls13_key_update(br_ssl_engine_context *cc, int for_input)
+{
+	const br_hash_class *dig;
+	int hash_id;
+	unsigned char *secret;
+
+	dig = suite_hash(cc, &hash_id);
+	if (dig == NULL) {
+		return 0;
+	}
+	secret = for_input ? cc->tls13_sap : cc->tls13_cap;
+	br_tls13_next_traffic_secret(dig, secret, secret);
+	return br_ssl_engine_tls13_switch(cc, for_input, 1);
+}

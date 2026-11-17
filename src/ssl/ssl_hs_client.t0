@@ -384,7 +384,7 @@ addr-ctx: hash_id
 	supports-rsa-sign? if num + then
 	supports-ecdsa? if num + then
 	1 <<
-	tls13-offered? supports-rsa-sign? and if 4 + then
+	tls13-offered? supports-rsa-pss? and if 4 + then
 	dup if 6 + then ;
 
 \ Length of Supported Versions extension: TLS 1.3, then each version from
@@ -582,7 +582,7 @@ cc: ext-ALPN-length ( -- len ) {
 			2 - write16             \ list length
 			supports-ecdsa? if 3 write-hashes then
 			supports-rsa-sign? if 1 write-hashes then
-			tls13-offered? supports-rsa-sign? and if
+			tls13-offered? supports-rsa-pss? and if
 				0x0804 write16
 				0x0805 write16
 			then
@@ -1288,17 +1288,159 @@ cc: do-client-sign ( -- sig_len ) {
 
 \ =======================================================================
 
-\ TLS 1.3 handshake of the client, after the ServerHello. Interim version
-\ (step 3c): it derives and installs the handshake keys and checks that
-\ the server's next message, now protected, is an EncryptedExtensions; then
-\ it stops with an error.
+\ Read EncryptedExtensions (TLS 1.3). The extensions that the server may
+\ send in answer to ours are processed as in TLS 1.2; the server may also
+\ send its supported groups, which are ignored.
+: read-EncryptedExtensions13 ( -- )
+	read-handshake-header 8 = ifnot ERR_UNEXPECTED fail then
+	read16 open-elt
+	ext-sni-length { ok-sni }
+	ext-frag-length { ok-frag }
+	ext-ALPN-length { ok-ALPN }
+	begin dup while
+		read16
+		case
+			0x0000 of
+				ok-sni ifnot ERR_EXTRA_EXTENSION fail then
+				0 >ok-sni
+				read-server-sni
+			endof
+			0x0001 of
+				ok-frag ifnot ERR_EXTRA_EXTENSION fail then
+				0 >ok-frag
+				read-server-frag
+			endof
+			0x0010 of
+				ok-ALPN ifnot ERR_EXTRA_EXTENSION fail then
+				0 >ok-ALPN
+				read-ALPN-from-server
+			endof
+			0x000A of read-ignore-16 endof
+			ERR_EXTRA_EXTENSION fail
+		endcase
+	repeat
+	close-elt
+	close-elt ;
+
+\ Read the contents of a TLS 1.3 Certificate message from the server (the
+\ header was read, the length is on the stack): an empty request context,
+\ then a list of certificates, each with extensions that we skip. The chain
+\ is validated by the X.509 engine, and its key must be usable for
+\ signatures.
+: read-Certificate13 ( lim -- )
+	read8 if ERR_BAD_PARAM fail then
+	-1 x509-start-chain
+	read24 open-elt
+	begin
+		dup while
+		read24 open-elt
+		dup x509-start-cert
+		begin
+			dup while
+			dup 256 > if 256 else dup then { len }
+			addr-pad len read-blob
+			len x509-append
+		repeat
+		close-elt
+		x509-end-cert
+		read16 skip-blob
+	repeat
+	close-elt
+	close-elt
+	x509-end-chain
+	dup if fail then drop
+	get-key-type-usages
+	dup ifnot ERR_UNEXPECTED fail then
+	CX 0 63 { BR_KEYTYPE_SIGN } and ifnot ERR_WRONG_KEY_USAGE fail then ;
+
+\ Read CertificateVerify: the signature algorithm, and the signature (in
+\ the pad). The transcript snapshot must have been taken before the message.
+: read-CertificateVerify13 ( -- )
+	read-handshake-header 15 = ifnot ERR_UNEXPECTED fail then
+	read16 { alg }
+	read16 { siglen }
+	siglen 512 > if ERR_BAD_PARAM fail then
+	addr-pad siglen read-blob
+	close-elt
+	alg siglen tls13-verify-cv
+	dup if fail then drop ;
+
+\ TLS 1.3 handshake of the client, after the ServerHello. There is no
+\ client authentication yet: a CertificateRequest is refused.
 : do-handshake13 ( -- )
 	tls13-hs-keys dup if fail then drop
 	1 0 tls13-switch
 	0 0 tls13-switch
-	read-handshake-header 8 = ifnot ERR_UNEXPECTED fail then
-	drop
-	ERR_BAD_STATE fail ;
+
+	read-EncryptedExtensions13
+
+	read-handshake-header
+	dup 13 = if ERR_NO_CLIENT_AUTH fail then
+	11 = ifnot ERR_UNEXPECTED fail then
+	read-Certificate13
+
+	tls13-snapshot
+	read-CertificateVerify13
+
+	\ Server Finished: the verify data covers the transcript up to
+	\ CertificateVerify.
+	tls13-snapshot
+	read-handshake-header 20 = ifnot ERR_UNEXPECTED fail then
+	dup tls13-hlen <> if ERR_BAD_FINISHED fail then
+	addr-pad 256 + tls13-hlen read-blob
+	close-elt
+	tls13-check-finished ifnot ERR_BAD_FINISHED fail then
+
+	\ Application secrets; the server's next records use them.
+	tls13-snapshot
+	tls13-app-keys
+	1 1 tls13-switch
+
+	\ Client Finished, with the handshake keys, then our application keys.
+	tls13-finished-out
+	20 write8 dup write24 addr-pad swap write-blob
+	flush-record
+	0 1 tls13-switch
+
+	1 addr-application_data set8
+	23 addr-record_type_out set8 ;
+
+\ Process a handshake message received after the TLS 1.3 handshake:
+\ NewSessionTicket is ignored (no resumption yet); KeyUpdate is applied
+\ and, if requested, answered.
+: read-post-handshake13 ( -- )
+	read-handshake-header
+	case
+		4 of
+			dup skip-blob
+			close-elt
+		endof
+		24 of
+			read8 { request }
+			close-elt
+			request 1 > if ERR_BAD_PARAM fail then
+			-1 tls13-key-update
+			request if
+				22 wait-rectype-out
+				24 write8 1 write24 0 write8
+				flush-record
+				0 tls13-key-update
+				23 wait-rectype-out
+			then
+		endof
+		ERR_UNEXPECTED fail
+	endcase ;
+
+\ Main loop after a TLS 1.3 handshake. There is no renegotiation.
+: main13 ( -- ! )
+	begin
+		wait-co
+		dup 0x07 and case
+			0x00 of drop endof
+			0x01 of drop read-post-handshake13 endof
+			ERR_UNEXPECTED fail
+		endcase
+	again ;
 
 \ Perform a handshake.
 : do-handshake ( -- )
@@ -1399,6 +1541,7 @@ cc: do-client-sign ( -- sig_len ) {
 : main ( -- ! )
 	\ Perform initial handshake.
 	do-handshake
+	addr-version get16 0x0304 = if main13 then
 
 	begin
 		\ Wait for further invocation. At that point, we should

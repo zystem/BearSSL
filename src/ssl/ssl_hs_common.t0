@@ -288,6 +288,70 @@ cc: tls13-switch ( for-input app -- ) {
 	}
 }
 
+\ Save the transcript hash (for CertificateVerify and Finished).
+cc: tls13-snapshot ( -- ) {
+	if (!br_ssl_engine_tls13_snapshot(ENG)) {
+		br_ssl_engine_fail(ENG, BR_ERR_BAD_STATE);
+		T0_CO();
+	}
+}
+
+\ Hash output length of the TLS 1.3 suite.
+cc: tls13-hlen ( -- n ) {
+	T0_PUSH(ENG->tls13_hlen);
+}
+
+\ Verify CertificateVerify (signature in the pad); returns 0 or an error code.
+cc: tls13-verify-cv ( alg sig-len -- err ) {
+	size_t sig_len = T0_POP();
+	unsigned alg = T0_POP();
+
+	T0_PUSH((uint32_t)br_ssl_engine_tls13_verify_cv(ENG, alg, sig_len));
+}
+
+\ Compute the server's Finished from the snapshot, and compare it with the
+\ received one (pad + 256). True if they are equal.
+cc: tls13-check-finished ( -- bool ) {
+	size_t n = br_ssl_engine_tls13_finished(ENG, 0);
+
+	T0_PUSHi(-(n != 0 && br_ssl_engine_tls13_check_finished(ENG, n)));
+}
+
+\ Compute the client's Finished from the snapshot, in the pad; returns its
+\ length.
+cc: tls13-finished-out ( -- len ) {
+	size_t n = br_ssl_engine_tls13_finished(ENG, 1);
+
+	if (n == 0) {
+		br_ssl_engine_fail(ENG, BR_ERR_BAD_STATE);
+		T0_CO();
+	}
+	T0_PUSH((uint32_t)n);
+}
+
+\ Compute the master secret and the application traffic secrets.
+cc: tls13-app-keys ( -- ) {
+	if (!br_ssl_engine_tls13_app_keys(ENG)) {
+		br_ssl_engine_fail(ENG, BR_ERR_BAD_STATE);
+		T0_CO();
+	}
+}
+
+\ KeyUpdate for one direction (non-zero for input).
+cc: tls13-key-update ( for-input -- ) {
+	int for_input = T0_POPi();
+
+	if (!br_ssl_engine_tls13_key_update(ENG, for_input)) {
+		br_ssl_engine_fail(ENG, BR_ERR_BAD_STATE);
+		T0_CO();
+	}
+}
+
+\ Test support for RSA-PSS signatures.
+cc: supports-rsa-pss? ( -- bool ) {
+	T0_PUSHi(-(ENG->irsapssvrfy != 0));
+}
+
 \ Look at the special values in the server random: 0 for none, 1 for
 \ HelloRetryRequest, 2 for the TLS 1.2 downgrade sentinel, 3 for the
 \ TLS 1.1 (or older) downgrade sentinel.

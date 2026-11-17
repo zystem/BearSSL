@@ -2323,6 +2323,20 @@ int br_ssl_engine_tls13_switch(br_ssl_engine_context *cc,
 	int for_input, int app);
 
 /*
+ * verify_cv: check the server's CertificateVerify (algorithm 'alg', the
+ *   signature of 'sig_len' bytes is in the pad) against the public key of
+ *   the X.509 engine and the transcript snapshot in tls13_th (up to the
+ *   Certificate message). Returns 0 or a BR_ERR_* code. Supported:
+ *   0x0403, 0x0503 (ECDSA P-256/SHA-256, P-384/SHA-384), 0x0804, 0x0805
+ *   (RSA-PSS with SHA-256 and SHA-384).
+ * key_update: replace the application traffic secret of one direction
+ *   with the next one and install the new keys.
+ */
+int br_ssl_engine_tls13_verify_cv(br_ssl_engine_context *cc,
+	unsigned alg, size_t sig_len);
+int br_ssl_engine_tls13_key_update(br_ssl_engine_context *cc, int for_input);
+
+/*
  * Switch to TLS 1.3 record protection, for incoming ('for_input' non-zero)
  * or outgoing records, with the keys and IV derived from a traffic secret.
  *    cc          the engine context

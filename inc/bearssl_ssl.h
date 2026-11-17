@@ -1155,6 +1155,7 @@ typedef struct {
 	const br_sslrec_out_ccm_class *iccm_out;
 	const br_ec_impl *iec;
 	br_rsa_pkcs1_vrfy irsavrfy;
+	br_rsa_pss_vrfy irsapssvrfy;
 	br_ecdsa_vrfy iecdsa;
 #endif
 } br_ssl_engine_context;
@@ -1744,6 +1745,21 @@ static inline void
 br_ssl_engine_set_rsavrfy(br_ssl_engine_context *cc, br_rsa_pkcs1_vrfy irsavrfy)
 {
 	cc->irsavrfy = irsavrfy;
+}
+
+/**
+ * \brief Set the RSA-PSS signature verification implementation (used by
+ * TLS 1.3 CertificateVerify). If it is not set (`NULL`), the client does
+ * not offer the `rsa_pss_rsae_*` signature algorithms.
+ * `br_ssl_engine_set_default_rsavrfy()` sets it too.
+ *
+ * \param cc          SSL engine context.
+ * \param irsapss     RSA-PSS verification implementation.
+ */
+static inline void
+br_ssl_engine_set_rsapssvrfy(br_ssl_engine_context *cc, br_rsa_pss_vrfy irsapss)
+{
+	cc->irsapssvrfy = irsapss;
 }
 
 /**
