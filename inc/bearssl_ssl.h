@@ -33,6 +33,7 @@
 #include "bearssl_hmac.h"
 #include "bearssl_prf.h"
 #include "bearssl_rand.h"
+#include "bearssl_tls13.h"
 #include "bearssl_x509.h"
 
 #ifdef __cplusplus
@@ -85,6 +86,11 @@ extern "C" {
 #define BR_TLS11   0x0302
 /** \brief Protocol version: TLS 1.2. */
 #define BR_TLS12   0x0303
+/**
+ * \brief Protocol version: TLS 1.3 (client only, in this fork; see
+ * `bearssl_tls13.h`).
+ */
+#define BR_TLS13   0x0304
 
 /*
  * Error constants. They are used to report the reason why a context has
@@ -875,6 +881,17 @@ typedef struct {
 	unsigned char incrypt;
 
 	/*
+	 * TLS 1.3 record protection (see bearssl_tls13.h). When 'tls13_in'
+	 * is non-zero, the incoming protected records use the in.vtable13
+	 * codec (inner content type); 'in_enc' tells whether the record being
+	 * received is protected (compatibility ChangeCipherSpec records
+	 * are not). 'tls13_out' is the same for outgoing records.
+	 */
+	unsigned char tls13_in;
+	unsigned char tls13_out;
+	unsigned char in_enc;
+
+	/*
 	 * Shutdown flag: when set to non-zero, incoming record bytes
 	 * will not be accepted anymore. This is used after a close_notify
 	 * has been received: afterwards, the engine no longer claims that
@@ -914,18 +931,24 @@ typedef struct {
 	 */
 	union {
 		const br_sslrec_in_class *vtable;
+		const br_sslrec13_in_class *vtable13;
 		br_sslrec_in_cbc_context cbc;
 		br_sslrec_gcm_context gcm;
 		br_sslrec_chapol_context chapol;
 		br_sslrec_ccm_context ccm;
+		br_sslrec13_gcm_context gcm13;
+		br_sslrec13_chapol_context chapol13;
 	} in;
 	union {
 		const br_sslrec_out_class *vtable;
+		const br_sslrec13_out_class *vtable13;
 		br_sslrec_out_clear_context clear;
 		br_sslrec_out_cbc_context cbc;
 		br_sslrec_gcm_context gcm;
 		br_sslrec_chapol_context chapol;
 		br_sslrec_ccm_context ccm;
+		br_sslrec13_gcm_context gcm13;
+		br_sslrec13_chapol_context chapol13;
 	} out;
 
 	/*
@@ -1013,8 +1036,44 @@ typedef struct {
 		const unsigned char *ip;
 	} cpu;
 	uint32_t dp_stack[32];
-	uint32_t rp_stack[32];
+	uint32_t rp_stack[48];
 	unsigned char pad[512];
+
+	/*
+	 * TLS 1.3 handshake state (client side for now): key share (private
+	 * scalar, public point, curve), key schedule, traffic secrets, and
+	 * the transcript hash snapshot used by CertificateVerify.
+	 */
+	unsigned char tls13_priv[66];
+	unsigned char tls13_pub[133];
+	unsigned char tls13_pub_len;
+	unsigned char tls13_curve;
+	unsigned char tls13_hlen;
+	br_tls13_ks_context tls13_ks;
+	unsigned char tls13_chs[48];
+	unsigned char tls13_shs[48];
+	unsigned char tls13_cap[48];
+	unsigned char tls13_sap[48];
+	unsigned char tls13_th[48];
+
+	/*
+	 * HelloRetryRequest state: 'tls13_hrr' is 0 (none), 1 (a HelloRetryRequest
+	 * was received) or 2 (ClientHello sent again); the group asked for
+	 * (0 if none), the suite, the cookie (at most 255 bytes), the hash of
+	 * the first ClientHello for each suite hash, and the raw bytes of the
+	 * server message being read (tee: 0 off, 1 on, 2 overflow).
+	 */
+	unsigned char tls13_hrr;
+	unsigned char tls13_hrr_group;
+	uint16_t tls13_hrr_suite;
+	unsigned char tls13_cookie_len;
+	unsigned char tls13_cookie[255];
+	unsigned char tls13_ch1_256[32];
+	unsigned char tls13_ch1_384[48];
+	unsigned char tls13_tee;
+	uint16_t tls13_tee_len;
+	unsigned char tls13_tee_buf[400];
+
 	unsigned char *hbuf_in, *hbuf_out, *saved_hbuf_out;
 	size_t hlen_in, hlen_out;
 	void (*hsrun)(void *ctx);
@@ -1114,6 +1173,7 @@ typedef struct {
 	const br_sslrec_out_ccm_class *iccm_out;
 	const br_ec_impl *iec;
 	br_rsa_pkcs1_vrfy irsavrfy;
+	br_rsa_pss_vrfy irsapssvrfy;
 	br_ecdsa_vrfy iecdsa;
 #endif
 } br_ssl_engine_context;
@@ -1703,6 +1763,21 @@ static inline void
 br_ssl_engine_set_rsavrfy(br_ssl_engine_context *cc, br_rsa_pkcs1_vrfy irsavrfy)
 {
 	cc->irsavrfy = irsavrfy;
+}
+
+/**
+ * \brief Set the RSA-PSS signature verification implementation (used by
+ * TLS 1.3 CertificateVerify). If it is not set (`NULL`), the client does
+ * not offer the `rsa_pss_rsae_*` signature algorithms.
+ * `br_ssl_engine_set_default_rsavrfy()` sets it too.
+ *
+ * \param cc          SSL engine context.
+ * \param irsapss     RSA-PSS verification implementation.
+ */
+static inline void
+br_ssl_engine_set_rsapssvrfy(br_ssl_engine_context *cc, br_rsa_pss_vrfy irsapss)
+{
+	cc->irsapssvrfy = irsapss;
 }
 
 /**

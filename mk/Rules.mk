@@ -224,6 +224,8 @@ OBJ = $(OBJSETTINGS) \
  $(OBJDIR)$Pssl_rec_ccm$O \
  $(OBJDIR)$Pssl_rec_chapol$O \
  $(OBJDIR)$Pssl_rec_gcm$O \
+ $(OBJDIR)$Pssl_rec13_chapol$O \
+ $(OBJDIR)$Pssl_rec13_gcm$O \
  $(OBJDIR)$Pssl_scert_single_ec$O \
  $(OBJDIR)$Pssl_scert_single_rsa$O \
  $(OBJDIR)$Pssl_server$O \
@@ -236,6 +238,8 @@ OBJ = $(OBJSETTINGS) \
  $(OBJDIR)$Pssl_server_minr2g$O \
  $(OBJDIR)$Pssl_server_minu2g$O \
  $(OBJDIR)$Pssl_server_minv2g$O \
+ $(OBJDIR)$Pssl_tls13_ks$O \
+ $(OBJDIR)$Pssl_tls13_hs$O \
  $(OBJDIR)$Paes_big_cbcdec$O \
  $(OBJDIR)$Paes_big_cbcenc$O \
  $(OBJDIR)$Paes_big_ctr$O \
@@ -1040,6 +1044,12 @@ $(OBJDIR)$Pssl_rec_chapol$O: src$Pssl$Pssl_rec_chapol.c $(HEADERSPRIV) $(OBJSETT
 $(OBJDIR)$Pssl_rec_gcm$O: src$Pssl$Pssl_rec_gcm.c $(HEADERSPRIV) $(OBJSETTINGS)
 	$(CC) $(CFLAGS) $(INCFLAGS) $(CCOUT)$(OBJDIR)$Pssl_rec_gcm$O src$Pssl$Pssl_rec_gcm.c
 
+$(OBJDIR)$Pssl_rec13_chapol$O: src$Pssl$Pssl_rec13_chapol.c $(HEADERSPRIV) $(OBJSETTINGS)
+	$(CC) $(CFLAGS) $(INCFLAGS) $(CCOUT)$(OBJDIR)$Pssl_rec13_chapol$O src$Pssl$Pssl_rec13_chapol.c
+
+$(OBJDIR)$Pssl_rec13_gcm$O: src$Pssl$Pssl_rec13_gcm.c $(HEADERSPRIV) $(OBJSETTINGS)
+	$(CC) $(CFLAGS) $(INCFLAGS) $(CCOUT)$(OBJDIR)$Pssl_rec13_gcm$O src$Pssl$Pssl_rec13_gcm.c
+
 $(OBJDIR)$Pssl_scert_single_ec$O: src$Pssl$Pssl_scert_single_ec.c $(HEADERSPRIV) $(OBJSETTINGS)
 	$(CC) $(CFLAGS) $(INCFLAGS) $(CCOUT)$(OBJDIR)$Pssl_scert_single_ec$O src$Pssl$Pssl_scert_single_ec.c
 
@@ -1075,6 +1085,12 @@ $(OBJDIR)$Pssl_server_minu2g$O: src$Pssl$Pssl_server_minu2g.c $(HEADERSPRIV) $(O
 
 $(OBJDIR)$Pssl_server_minv2g$O: src$Pssl$Pssl_server_minv2g.c $(HEADERSPRIV) $(OBJSETTINGS)
 	$(CC) $(CFLAGS) $(INCFLAGS) $(CCOUT)$(OBJDIR)$Pssl_server_minv2g$O src$Pssl$Pssl_server_minv2g.c
+
+$(OBJDIR)$Pssl_tls13_ks$O: src$Pssl$Pssl_tls13_ks.c $(HEADERSPRIV) $(OBJSETTINGS)
+	$(CC) $(CFLAGS) $(INCFLAGS) $(CCOUT)$(OBJDIR)$Pssl_tls13_ks$O src$Pssl$Pssl_tls13_ks.c
+
+$(OBJDIR)$Pssl_tls13_hs$O: src$Pssl$Pssl_tls13_hs.c $(HEADERSPRIV) $(OBJSETTINGS)
+	$(CC) $(CFLAGS) $(INCFLAGS) $(CCOUT)$(OBJDIR)$Pssl_tls13_hs$O src$Pssl$Pssl_tls13_hs.c
 
 $(OBJDIR)$Paes_big_cbcdec$O: src$Psymcipher$Paes_big_cbcdec.c $(HEADERSPRIV) $(OBJSETTINGS)
 	$(CC) $(CFLAGS) $(INCFLAGS) $(CCOUT)$(OBJDIR)$Paes_big_cbcdec$O src$Psymcipher$Paes_big_cbcdec.c

@@ -273,6 +273,8 @@ coresrc=" \
 	src/ssl/ssl_rec_ccm.c \
 	src/ssl/ssl_rec_chapol.c \
 	src/ssl/ssl_rec_gcm.c \
+	src/ssl/ssl_rec13_chapol.c \
+	src/ssl/ssl_rec13_gcm.c \
 	src/ssl/ssl_scert_single_ec.c \
 	src/ssl/ssl_scert_single_rsa.c \
 	src/ssl/ssl_server.c \
@@ -285,6 +287,8 @@ coresrc=" \
 	src/ssl/ssl_server_minr2g.c \
 	src/ssl/ssl_server_minu2g.c \
 	src/ssl/ssl_server_minv2g.c \
+	src/ssl/ssl_tls13_ks.c \
+	src/ssl/ssl_tls13_hs.c \
 	src/symcipher/aes_big_cbcdec.c \
 	src/symcipher/aes_big_cbcenc.c \
 	src/symcipher/aes_big_ctr.c \

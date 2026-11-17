@@ -603,8 +603,9 @@ do_twrch(int argc, char *argv[])
 		num_suites = 0;
 
 		for (u = 0; cipher_suites[u].name; u ++) {
-			if ((cipher_suites[u].req & REQ_TLS12) == 0
-				|| vmax >= BR_TLS12)
+			if ((cipher_suites[u].req & REQ_TLS13) == 0
+				&& ((cipher_suites[u].req & REQ_TLS12) == 0
+				|| vmax >= BR_TLS12))
 			{
 				num_suites ++;
 			}
@@ -612,8 +613,9 @@ do_twrch(int argc, char *argv[])
 		suites = xmalloc(num_suites * sizeof *suites);
 		num_suites = 0;
 		for (u = 0; cipher_suites[u].name; u ++) {
-			if ((cipher_suites[u].req & REQ_TLS12) == 0
-				|| vmax >= BR_TLS12)
+			if ((cipher_suites[u].req & REQ_TLS13) == 0
+				&& ((cipher_suites[u].req & REQ_TLS12) == 0
+				|| vmax >= BR_TLS12))
 			{
 				suites[num_suites ++] = cipher_suites[u];
 			}

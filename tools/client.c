@@ -858,8 +858,10 @@ do_client(int argc, char *argv[])
 		num_suites = 0;
 
 		for (u = 0; cipher_suites[u].name; u ++) {
-			if ((cipher_suites[u].req & REQ_TLS12) == 0
+			if (((cipher_suites[u].req & REQ_TLS12) == 0
 				|| vmax >= BR_TLS12)
+				&& ((cipher_suites[u].req & REQ_TLS13) == 0
+				|| vmax >= BR_TLS13))
 			{
 				num_suites ++;
 			}
@@ -867,8 +869,10 @@ do_client(int argc, char *argv[])
 		suites = xmalloc(num_suites * sizeof *suites);
 		num_suites = 0;
 		for (u = 0; cipher_suites[u].name; u ++) {
-			if ((cipher_suites[u].req & REQ_TLS12) == 0
+			if (((cipher_suites[u].req & REQ_TLS12) == 0
 				|| vmax >= BR_TLS12)
+				&& ((cipher_suites[u].req & REQ_TLS13) == 0
+				|| vmax >= BR_TLS13))
 			{
 				suites[num_suites ++] = cipher_suites[u];
 			}
@@ -927,6 +931,12 @@ do_client(int argc, char *argv[])
 		if ((req & REQ_TLS12) != 0 && vmax < BR_TLS12) {
 			fprintf(stderr,
 				"ERROR: cipher suite %s requires TLS 1.2\n",
+				suites[u].name);
+			goto client_exit_error;
+		}
+		if ((req & REQ_TLS13) != 0 && vmax < BR_TLS13) {
+			fprintf(stderr,
+				"ERROR: cipher suite %s requires TLS 1.3\n",
 				suites[u].name);
 			goto client_exit_error;
 		}

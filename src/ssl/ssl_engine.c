@@ -315,7 +315,11 @@ make_ready_out(br_ssl_engine_context *rc)
 
 	a = 5;
 	b = rc->obuf_len - a;
-	rc->out.vtable->max_plaintext(&rc->out.vtable, &a, &b);
+	if (rc->tls13_out) {
+		rc->out.vtable13->max_plaintext(&rc->out.vtable13, &a, &b);
+	} else {
+		rc->out.vtable->max_plaintext(&rc->out.vtable, &a, &b);
+	}
 	if ((b - a) > rc->max_frag_len) {
 		b = a + rc->max_frag_len;
 	}
@@ -397,6 +401,9 @@ br_ssl_engine_set_buffers_bidi(br_ssl_engine_context *rc,
 {
 	rc->iomode = BR_IO_INOUT;
 	rc->incrypt = 0;
+	rc->tls13_in = 0;
+	rc->tls13_out = 0;
+	rc->in_enc = 0;
 	rc->err = BR_ERR_OK;
 	rc->version_in = 0;
 	rc->record_type_in = 0;
@@ -677,9 +684,29 @@ recvrec_ack(br_ssl_engine_context *rc, size_t len)
 		 * maximum allowed plaintext length (16384 bytes).
 		 */
 		rlen = br_dec16be(rc->ibuf + 3);
-		if (rc->incrypt) {
-			if (!rc->in.vtable->check_length(
-				&rc->in.vtable, rlen))
+		rc->in_enc = rc->incrypt;
+		if (rc->tls13_in && rc->incrypt) {
+			/*
+			 * TLS 1.3: protected records have outer type 23;
+			 * a plaintext ChangeCipherSpec record (compatibility
+			 * mode) is still possible, and is processed (and
+			 * ignored) as such.
+			 */
+			if (rc->record_type_in == BR_SSL_CHANGE_CIPHER_SPEC) {
+				rc->in_enc = 0;
+			} else if (rc->record_type_in
+				!= BR_SSL_APPLICATION_DATA)
+			{
+				br_ssl_engine_fail(rc, BR_ERR_UNEXPECTED);
+				return;
+			}
+		}
+		if (rc->in_enc) {
+			if (!(rc->tls13_in
+				? rc->in.vtable13->check_length(
+					&rc->in.vtable13, rlen)
+				: rc->in.vtable->check_length(
+					&rc->in.vtable, rlen)))
 			{
 				br_ssl_engine_fail(rc, BR_ERR_BAD_LENGTH);
 				return;
@@ -723,7 +750,7 @@ recvrec_ack(br_ssl_engine_context *rc, size_t len)
 	 * transport medium when we still have payload bytes to be
 	 * acknowledged.
 	 */
-	if (!rc->incrypt) {
+	if (!rc->in_enc) {
 		rc->ixa = 5;
 		return;
 	}
@@ -740,8 +767,20 @@ recvrec_ack(br_ssl_engine_context *rc, size_t len)
 	 * We got the full record. Decrypt it.
 	 */
 	pbuf_len = rc->ixa - 5;
-	pbuf = rc->in.vtable->decrypt(&rc->in.vtable,
-		rc->record_type_in, rc->version_in, rc->ibuf + 5, &pbuf_len);
+	if (rc->tls13_in) {
+		int inner_type;
+
+		inner_type = 0;
+		pbuf = rc->in.vtable13->decrypt(&rc->in.vtable13,
+			rc->ibuf + 5, &pbuf_len, &inner_type);
+		if (pbuf != 0) {
+			rc->record_type_in = (unsigned char)inner_type;
+		}
+	} else {
+		pbuf = rc->in.vtable->decrypt(&rc->in.vtable,
+			rc->record_type_in, rc->version_in,
+			rc->ibuf + 5, &pbuf_len);
+	}
 	if (pbuf == 0) {
 		br_ssl_engine_fail(rc, BR_ERR_BAD_MAC);
 		return;
@@ -848,9 +887,14 @@ sendpld_flush(br_ssl_engine_context *rc, int force)
 	if (xlen == 0 && !force) {
 		return;
 	}
-	buf = rc->out.vtable->encrypt(&rc->out.vtable,
-		rc->record_type_out, rc->version_out,
-		rc->obuf + rc->oxc, &xlen);
+	if (rc->tls13_out) {
+		buf = rc->out.vtable13->encrypt(&rc->out.vtable13,
+			rc->record_type_out, rc->obuf + rc->oxc, &xlen);
+	} else {
+		buf = rc->out.vtable->encrypt(&rc->out.vtable,
+			rc->record_type_out, rc->version_out,
+			rc->obuf + rc->oxc, &xlen);
+	}
 	rc->oxb = rc->oxa = (size_t)(buf - rc->obuf);
 	rc->oxc = rc->oxa + xlen;
 }
@@ -1200,6 +1244,21 @@ br_ssl_engine_recvrec_ack(br_ssl_engine_context *cc, size_t len)
 	if (buf != NULL) {
 		switch (cc->record_type_in) {
 		case BR_SSL_CHANGE_CIPHER_SPEC:
+			if (cc->tls13_in || cc->tls13_hrr != 0) {
+				/*
+				 * TLS 1.3 compatibility mode: a plaintext
+				 * ChangeCipherSpec record (one byte of
+				 * value 1) is ignored.
+				 */
+				if (len != 1 || buf[0] != 1) {
+					br_ssl_engine_fail(cc, BR_ERR_BAD_CCS);
+					break;
+				}
+				recvpld_ack(cc, len);
+				break;
+			}
+			jump_handshake(cc, 0);
+			break;
 		case BR_SSL_ALERT:
 		case BR_SSL_HANDSHAKE:
 			jump_handshake(cc, 0);
@@ -1536,6 +1595,83 @@ br_ssl_engine_switch_chapol_out(br_ssl_engine_context *cc,
 	}
 	cc->ichapol_out->init(&cc->out.chapol.vtable.out,
 		cc->ichacha, cc->ipoly, cipher_key, iv);
+}
+
+/* see inner.h */
+int
+br_ssl_engine_switch13(br_ssl_engine_context *cc, int for_input,
+	unsigned suite, const void *secret)
+{
+	const br_hash_class *dig;
+	unsigned char key[32], iv[12];
+	size_t key_len;
+	int chapol;
+
+	chapol = 0;
+	switch (suite) {
+	case 0x1301:
+		dig = br_multihash_getimpl(&cc->mhash, br_sha256_ID);
+		key_len = 16;
+		break;
+	case 0x1302:
+		dig = br_multihash_getimpl(&cc->mhash, br_sha384_ID);
+		key_len = 32;
+		break;
+	case 0x1303:
+		dig = br_multihash_getimpl(&cc->mhash, br_sha256_ID);
+		key_len = 32;
+		chapol = 1;
+		break;
+	default:
+		return 0;
+	}
+	if (dig == NULL) {
+		return 0;
+	}
+	if (chapol) {
+		if (cc->ichacha == NULL || cc->ipoly == NULL) {
+			return 0;
+		}
+	} else {
+		if (cc->iaes_ctr == NULL || cc->ighash == NULL) {
+			return 0;
+		}
+	}
+	br_tls13_traffic_keys(dig, secret, key_len, key, iv);
+	if (for_input) {
+		if (chapol) {
+			br_sslrec13_in_chapol_vtable.init(
+				&cc->in.chapol13.vtable.in,
+				cc->ichacha, cc->ipoly, key, iv);
+		} else {
+			br_sslrec13_in_gcm_vtable.init(
+				&cc->in.gcm13.vtable.in,
+				cc->iaes_ctr, key, key_len, cc->ighash, iv);
+		}
+		cc->tls13_in = 1;
+		cc->incrypt = 1;
+	} else {
+		if (chapol) {
+			br_sslrec13_out_chapol_vtable.init(
+				&cc->out.chapol13.vtable.out,
+				cc->ichacha, cc->ipoly, key, iv);
+		} else {
+			br_sslrec13_out_gcm_vtable.init(
+				&cc->out.gcm13.vtable.out,
+				cc->iaes_ctr, key, key_len, cc->ighash, iv);
+		}
+		cc->tls13_out = 1;
+		if (cc->oxa == cc->oxc) {
+			/*
+			 * The current (empty) outgoing record was prepared
+			 * for the previous codec; redo it, because the
+			 * overhead is not the same.
+			 */
+			make_ready_out(cc);
+		}
+	}
+	memset(key, 0, sizeof key);
+	return 1;
 }
 
 /* see inner.h */

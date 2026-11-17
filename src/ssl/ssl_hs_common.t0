@@ -36,6 +36,25 @@ preamble {
  */
 #define ENG  ((br_ssl_engine_context *)(void *)((unsigned char *)t0ctx - offsetof(br_ssl_engine_context, cpu)))
 
+/*
+ * When the "tee" is on (TLS 1.3 ServerHello: a HelloRetryRequest must be
+ * hashed again later), the handshake bytes that are read are also copied
+ * in a buffer. A tee value of 2 means that the buffer was too small.
+ */
+static void
+tee_bytes(br_ssl_engine_context *eng, const unsigned char *p, size_t n)
+{
+	if (eng->tls13_tee != 1) {
+		return;
+	}
+	if ((size_t)eng->tls13_tee_len + n > sizeof eng->tls13_tee_buf) {
+		eng->tls13_tee = 2;
+		return;
+	}
+	memcpy(eng->tls13_tee_buf + eng->tls13_tee_len, p, n);
+	eng->tls13_tee_len += (uint16_t)n;
+}
+
 }
 
 \ IMPLEMENTATION NOTES
@@ -176,6 +195,14 @@ addr-eng: alert
 addr-eng: close_received
 addr-eng: protocol_names_num
 addr-eng: selected_protocol
+addr-eng: tls13_pub
+addr-eng: tls13_pub_len
+addr-eng: tls13_curve
+addr-eng: tls13_hrr
+addr-eng: tls13_hrr_group
+addr-eng: tls13_hrr_suite
+addr-eng: tls13_cookie_len
+addr-eng: tls13_cookie
 
 \ Similar to 'addr-eng:', for fields in the 'session' substructure.
 : addr-session-field:
@@ -258,6 +285,179 @@ cc: supported-hash-functions ( -- x num ) {
 \ Test support for RSA signatures.
 cc: supports-rsa-sign? ( -- bool ) {
 	T0_PUSHi(-(ENG->irsavrfy != 0));
+}
+
+\ TLS 1.3 helpers (see ssl_tls13_hs.c).
+
+\ Generate the key share; returns the public point length (0 on failure).
+cc: tls13-keygen ( -- len ) {
+	T0_PUSH((uint32_t)br_ssl_engine_tls13_keygen(ENG));
+}
+
+\ Compute the handshake secrets from the server's key share; returns 0 or
+\ an error code.
+cc: tls13-hs-keys ( -- err ) {
+	T0_PUSH((uint32_t)br_ssl_engine_tls13_hs_keys(ENG));
+}
+
+\ Install TLS 1.3 keys (client role): 'for-input' non-zero for the
+\ incoming direction; 'app' non-zero for the application keys.
+cc: tls13-switch ( for-input app -- ) {
+	int app = T0_POPi();
+	int for_input = T0_POPi();
+
+	if (!br_ssl_engine_tls13_switch(ENG, for_input, app)) {
+		br_ssl_engine_fail(ENG, BR_ERR_BAD_PARAM);
+		T0_CO();
+	}
+}
+
+\ Switch the tee on (non-zero) or off, and empty it.
+cc: tls13-tee ( on -- ) {
+	ENG->tls13_tee = (T0_POPi() != 0);
+	ENG->tls13_tee_len = 0;
+}
+
+\ Generate the key share for a given group (curve identifier); returns the
+\ public point length (0 on failure).
+cc: tls13-keygen-group ( group -- len ) {
+	int group = T0_POPi();
+
+	T0_PUSH((uint32_t)br_ssl_engine_tls13_keygen_group(ENG, group));
+}
+
+\ Save the hash of the first ClientHello.
+cc: tls13-save-ch1 ( -- ) {
+	br_ssl_engine_tls13_save_ch1(ENG);
+}
+
+\ Restart the transcript after a HelloRetryRequest; returns 0 or an error.
+cc: tls13-hrr-restart ( -- err ) {
+	T0_PUSH((uint32_t)br_ssl_engine_tls13_hrr_restart(ENG));
+}
+
+\ Save the transcript hash (for CertificateVerify and Finished).
+cc: tls13-snapshot ( -- ) {
+	if (!br_ssl_engine_tls13_snapshot(ENG)) {
+		br_ssl_engine_fail(ENG, BR_ERR_BAD_STATE);
+		T0_CO();
+	}
+}
+
+\ Hash output length of the TLS 1.3 suite.
+cc: tls13-hlen ( -- n ) {
+	T0_PUSH(ENG->tls13_hlen);
+}
+
+\ Verify CertificateVerify (signature in the pad); returns 0 or an error code.
+cc: tls13-verify-cv ( alg sig-len -- err ) {
+	size_t sig_len = T0_POP();
+	unsigned alg = T0_POP();
+
+	T0_PUSH((uint32_t)br_ssl_engine_tls13_verify_cv(ENG, alg, sig_len));
+}
+
+\ Compute the server's Finished from the snapshot, and compare it with the
+\ received one (pad + 256). True if they are equal.
+cc: tls13-check-finished ( -- bool ) {
+	size_t n = br_ssl_engine_tls13_finished(ENG, 0);
+
+	T0_PUSHi(-(n != 0 && br_ssl_engine_tls13_check_finished(ENG, n)));
+}
+
+\ Compute the client's Finished from the snapshot, in the pad; returns its
+\ length.
+cc: tls13-finished-out ( -- len ) {
+	size_t n = br_ssl_engine_tls13_finished(ENG, 1);
+
+	if (n == 0) {
+		br_ssl_engine_fail(ENG, BR_ERR_BAD_STATE);
+		T0_CO();
+	}
+	T0_PUSH((uint32_t)n);
+}
+
+\ Compute the master secret and the application traffic secrets.
+cc: tls13-app-keys ( -- ) {
+	if (!br_ssl_engine_tls13_app_keys(ENG)) {
+		br_ssl_engine_fail(ENG, BR_ERR_BAD_STATE);
+		T0_CO();
+	}
+}
+
+\ KeyUpdate for one direction (non-zero for input).
+cc: tls13-key-update ( for-input -- ) {
+	int for_input = T0_POPi();
+
+	if (!br_ssl_engine_tls13_key_update(ENG, for_input)) {
+		br_ssl_engine_fail(ENG, BR_ERR_BAD_STATE);
+		T0_CO();
+	}
+}
+
+\ Value of our record_size_limit extension (RFC 8449, TLS 1.3): the largest
+\ inner plaintext (content, type, padding) that fits in our input buffer,
+\ at most 16385.
+cc: rsl-value ( -- n ) {
+	size_t v = ENG->ibuf_len;
+
+	v = (v > 5 + 16) ? v - 5 - 16 : 0;
+	if (v > 16385) {
+		v = 16385;
+	}
+	if (v < 64) {
+		v = 64;
+	}
+	T0_PUSH((uint32_t)v);
+}
+
+\ Apply the server's record_size_limit: our records carry at most 'v - 1'
+\ bytes of content (the inner type takes the last byte).
+cc: apply-peer-rsl ( v -- ) {
+	uint32_t v = T0_POP();
+
+	if (v < 64) {
+		br_ssl_engine_fail(ENG, BR_ERR_BAD_PARAM);
+		T0_CO();
+	}
+	if (v > 16385) {
+		v = 16385;
+	}
+	if ((size_t)(v - 1) < ENG->max_frag_len) {
+		ENG->max_frag_len = (uint16_t)(v - 1);
+	}
+}
+
+\ Test support for RSA-PSS signatures.
+cc: supports-rsa-pss? ( -- bool ) {
+	T0_PUSHi(-(ENG->irsapssvrfy != 0));
+}
+
+\ Look at the special values in the server random: 0 for none, 1 for
+\ HelloRetryRequest, 2 for the TLS 1.2 downgrade sentinel, 3 for the
+\ TLS 1.1 (or older) downgrade sentinel.
+cc: server-random-kind ( -- n ) {
+	static const unsigned char hrr[32] = {
+		0xCF, 0x21, 0xAD, 0x74, 0xE5, 0x9A, 0x61, 0x11,
+		0xBE, 0x1D, 0x8C, 0x02, 0x1E, 0x65, 0xB8, 0x91,
+		0xC2, 0xA2, 0x11, 0x16, 0x7A, 0xBB, 0x8C, 0x5E,
+		0x07, 0x9E, 0x09, 0xE2, 0xC8, 0xA8, 0x33, 0x9C
+	};
+	static const unsigned char dg[7] = {
+		0x44, 0x4F, 0x57, 0x4E, 0x47, 0x52, 0x44
+	};
+	uint32_t r = 0;
+
+	if (memcmp(ENG->server_random, hrr, 32) == 0) {
+		r = 1;
+	} else if (memcmp(ENG->server_random + 24, dg, 7) == 0) {
+		if (ENG->server_random[31] == 1) {
+			r = 2;
+		} else if (ENG->server_random[31] == 0) {
+			r = 3;
+		}
+	}
+	T0_PUSH(r);
 }
 
 \ Test support for ECDSA signatures.
@@ -435,6 +635,7 @@ cc: read8-native ( -- x ) {
 		x = *ENG->hbuf_in ++;
 		if (ENG->record_type_in == BR_SSL_HANDSHAKE) {
 			br_multihash_update(&ENG->mhash, &x, 1);
+			tee_bytes(ENG, &x, 1);
 		}
 		T0_PUSH(x);
 		ENG->hlen_in --;
@@ -464,6 +665,7 @@ cc: read-chunk-native ( addr len -- addr len ) {
 		memcpy((unsigned char *)ENG + addr, ENG->hbuf_in, clen);
 		if (ENG->record_type_in == BR_SSL_HANDSHAKE) {
 			br_multihash_update(&ENG->mhash, ENG->hbuf_in, clen);
+			tee_bytes(ENG, ENG->hbuf_in, clen);
 		}
 		T0_PUSH(addr + (uint32_t)clen);
 		T0_PUSH(len - (uint32_t)clen);
@@ -832,6 +1034,13 @@ hexb| C0AF 2904 | \ TLS_ECDHE_ECDSA_WITH_AES_256_CCM_8
 
 hexb| CCA8 1504 | \ TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
 hexb| CCA9 2504 | \ TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
+
+\ TLS 1.3 cipher suites. They use the key type 5, which no TLS 1.2 code
+\ accepts (expected-key-type yields 0 for it); the PRF element is the hash
+\ function of the suite. They must never be selected for TLS 1.2 or older.
+hexb| 1301 5304 | \ TLS_AES_128_GCM_SHA256
+hexb| 1302 5405 | \ TLS_AES_256_GCM_SHA384
+hexb| 1303 5504 | \ TLS_CHACHA20_POLY1305_SHA256
 
 hexb| 0000 | \ List terminator.
 
