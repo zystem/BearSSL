@@ -1646,6 +1646,14 @@ br_ssl_engine_switch13(br_ssl_engine_context *cc, int for_input,
 				cc->iaes_ctr, key, key_len, cc->ighash, iv);
 		}
 		cc->tls13_out = 1;
+		if (cc->oxa == cc->oxc) {
+			/*
+			 * The current (empty) outgoing record was prepared
+			 * for the previous codec; redo it, because the
+			 * overhead is not the same.
+			 */
+			make_ready_out(cc);
+		}
 	}
 	memset(key, 0, sizeof key);
 	return 1;

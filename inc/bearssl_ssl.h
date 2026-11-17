@@ -1033,6 +1033,24 @@ typedef struct {
 	uint32_t dp_stack[32];
 	uint32_t rp_stack[32];
 	unsigned char pad[512];
+
+	/*
+	 * TLS 1.3 handshake state (client side for now): key share (private
+	 * scalar, public point, curve), key schedule, traffic secrets, and
+	 * the transcript hash snapshot used by CertificateVerify.
+	 */
+	unsigned char tls13_priv[32];
+	unsigned char tls13_pub[133];
+	unsigned char tls13_pub_len;
+	unsigned char tls13_curve;
+	unsigned char tls13_hlen;
+	br_tls13_ks_context tls13_ks;
+	unsigned char tls13_chs[48];
+	unsigned char tls13_shs[48];
+	unsigned char tls13_cap[48];
+	unsigned char tls13_sap[48];
+	unsigned char tls13_th[48];
+
 	unsigned char *hbuf_in, *hbuf_out, *saved_hbuf_out;
 	size_t hlen_in, hlen_out;
 	void (*hsrun)(void *ctx);

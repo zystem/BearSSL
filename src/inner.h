@@ -2294,6 +2294,35 @@ void br_ssl_engine_switch_gcm_in(br_ssl_engine_context *cc,
 	const br_block_ctr_class *bc_impl, size_t cipher_key_len);
 
 /*
+ * TLS 1.3 handshake helpers (ssl_tls13_hs.c), used by the T0 code.
+ *
+ * keygen: generate the key share (X25519 if available, otherwise P-256) in
+ *   tls13_priv/tls13_pub; returns the public point length, 0 on failure.
+ * hs_keys: with the peer's share in ecdhe_curve/ecdhe_point (the same
+ *   curve as ours) and the transcript up to ServerHello in the multi-hasher,
+ *   compute the handshake secret and the two handshake traffic secrets.
+ *   Returns 0 or a BR_ERR_* code.
+ * snapshot: save the current transcript hash in tls13_th; 1 on success.
+ * finished: compute the Finished verify_data (using tls13_th) in the pad;
+ *   returns its length (0 on failure).
+ * check_finished: constant-time comparison of pad[0..len) with
+ *   pad[256..256+len).
+ * app_keys: from the snapshot of the transcript up to the server Finished,
+ *   compute the master secret and the application traffic secrets.
+ * switch: install the handshake (app = 0) or application (app = 1) keys
+ *   for the input or output direction (client role).
+ */
+size_t br_ssl_engine_tls13_keygen(br_ssl_engine_context *cc);
+int br_ssl_engine_tls13_hs_keys(br_ssl_engine_context *cc);
+int br_ssl_engine_tls13_snapshot(br_ssl_engine_context *cc);
+size_t br_ssl_engine_tls13_finished(br_ssl_engine_context *cc,
+	int from_client);
+int br_ssl_engine_tls13_check_finished(br_ssl_engine_context *cc, size_t len);
+int br_ssl_engine_tls13_app_keys(br_ssl_engine_context *cc);
+int br_ssl_engine_tls13_switch(br_ssl_engine_context *cc,
+	int for_input, int app);
+
+/*
  * Switch to TLS 1.3 record protection, for incoming ('for_input' non-zero)
  * or outgoing records, with the keys and IV derived from a traffic secret.
  *    cc          the engine context

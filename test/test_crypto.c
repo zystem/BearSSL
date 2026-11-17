@@ -9805,6 +9805,230 @@ test_TLS13_REC(void)
 }
 
 
+static const struct {
+	const char *cpriv;
+	const char *cpub;
+	const char *spub;
+	const char *ch;
+	const char *sh;
+	const char *ee;
+	const char *cert;
+	const char *cv;
+	const char *sfin;
+	const char *chs;
+	const char *shs;
+	const char *cap;
+	const char *sap;
+	const char *sfv;
+	const char *cfv;
+	const char *cfin;
+	const char *srec;
+	const char *spay;
+	const char *crec;
+	const char *arec;
+	const char *apay;
+} test13hs_vec = {
+	"49af42ba7f7994852d713ef2784bcbcaa7911de26adc5642cb634540e7ea5005",
+	"99381de560e4bd43d23d8e435a7dbafeb3c06e51c13cae4d5413691e529aaf2c",
+	"c9828876112095fe66762bdbf7c672e156d6cc253b833df1dd69b1b04e751f0f",
+	"010000c00303cb34ecb1e78163ba1c38c6dacb196a6dffa21a8d9912ec18a2ef6283024dece7000006130113031302010000910000000b0009000006736572766572ff01000100000a00140012001d0017001800190100010101020103010400230000003300260024001d002099381de560e4bd43d23d8e435a7dbafeb3c06e51c13cae4d5413691e529aaf2c002b0003020304000d0020001e040305030603020308040805080604010501060102010402050206020202002d00020101001c00024001",
+	"020000560303a6af06a4121860dc5e6e60249cd34c95930c8ac5cb1434dac155772ed3e2692800130100002e00330024001d0020c9828876112095fe66762bdbf7c672e156d6cc253b833df1dd69b1b04e751f0f002b00020304",
+	"080000240022000a00140012001d00170018001901000101010201030104001c0002400100000000",
+	"0b0001b9000001b50001b0308201ac30820115a003020102020102300d06092a864886f70d01010b0500300e310c300a06035504031303727361301e170d3136303733303031323335395a170d3236303733303031323335395a300e310c300a0603550403130372736130819f300d06092a864886f70d010101050003818d0030818902818100b4bb498f8279303d980836399b36c6988c0c68de55e1bdb826d3901a2461eafd2de49a91d015abbc9a95137ace6c1af19eaa6af98c7ced43120998e187a80ee0ccb0524b1b018c3e0b63264d449a6d38e22a5fda430846748030530ef0461c8ca9d9efbfae8ea6d1d03e2bd193eff0ab9a8002c47428a6d35a8d88d79f7f1e3f0203010001a31a301830090603551d1304023000300b0603551d0f0404030205a0300d06092a864886f70d01010b05000381810085aad2a0e5b9276b908c65f73a7267170618a54c5f8a7b337d2df7a594365417f2eae8f8a58c8f8172f9319cf36b7fd6c55b80f21a03015156726096fd335e5e67f2dbf102702e608ccae6bec1fc63a42a99be5c3eb7107c3c54e9b9eb2bd5203b1c3b84e0a8b2f759409ba3eac9d91d402dcc0cc8f8961229ac9187b42b4de10000",
+	"0f000084080400805a747c5d88fa9bd2e55ab085a61015b7211f824cd484145ab3ff52f1fda8477b0b7abc90db78e2d33a5c141a078653fa6bef780c5ea248eeaaa785c4f394cab6d30bbe8d4859ee511f602957b15411ac027671459e46445c9ea58c181e818e95b8c3fb0bf3278409d3be152a3da5043e063dda65cdf5aea20d53dfacd42f74f3",
+	"140000209b9b141d906337fbd2cbdce71df4deda4ab42c309572cb7fffee5454b78f0718",
+	"b3eddb126e067f35a780b3abf45e2d8f3b1a950738f52e9600746a0e27a55a21",
+	"b67b7d690cc16c4e75e54213cb2d37b4e9c912bcded9105d42befd59d391ad38",
+	"9e40646ce79a7f9dc05af8889bce6552875afa0b06df0087f792ebb7c17504a5",
+	"a11af9f05531f856ad47116b45a950328204b4f44bfb6b3a4b4f1f3fcb631643",
+	"9b9b141d906337fbd2cbdce71df4deda4ab42c309572cb7fffee5454b78f0718",
+	"a8ec436d677634ae525ac1fcebe11a039ec17694fac6e98527b642f2edd5ce61",
+	"14000020a8ec436d677634ae525ac1fcebe11a039ec17694fac6e98527b642f2edd5ce61",
+	"17030302a2d1ff334a56f5bff6594a07cc87b580233f500f45e489e7f33af35edf7869fcf40aa40aa2b8ea73f848a7ca07612ef9f945cb960b4068905123ea78b111b429ba9191cd05d2a389280f526134aadc7fc78c4b729df828b5ecf7b13bd9aefb0e57f271585b8ea9bb355c7c79020716cfb9b1183ef3ab20e37d57a6b9d7477609aee6e122a4cf51427325250c7d0e509289444c9b3a648f1d71035d2ed65b0e3cdd0cbae8bf2d0b227812cbb360987255cc744110c453baa4fcd610928d809810e4b7ed1a8fd991f06aa6248204797e36a6a73b70a2559c09ead686945ba246ab66e5edd8044b4c6de3fcf2a89441ac66272fd8fb330ef8190579b3684596c960bd596eea520a56a8d650f563aad27409960dca63d3e688611ea5e22f4415cf9538d51a200c27034272968a264ed6540c84838d89f72c24461aad6d26f59ecaba9acbbb317b66d902f4f292a36ac1b639c637ce343117b659622245317b49eeda0c6258f100d7d961ffb138647e92ea330faeea6dfa31c7a84dc3bd7e1b7a6c7178af36879018e3f252107f243d243dc7339d5684c8b0378bf30244da8c87c843f5e56eb4c5e8280a2b48052cf93b16499a66db7cca71e4599426f7d461e66f99882bd89fc50800becca62d6c74116dbd2972fda1fa80f85df881edbe5a37668936b335583b599186dc5c6918a396fa48a181d6b6fa4f9d62d513afbb992f2b992f67f8afe67f76913fa388cb5630c8ca01e0c65d11c66a1e2ac4c85977b7c7a6999bbf10dc35ae69f5515614636c0b9b68c19ed2e31c0b3b66763038ebba42f3b38edc0399f3a9f23faa63978c317fc9fa66a73f60f0504de93b5b845e275592c12335ee340bbc4fddd502784016e4b3be7ef04dda49f4b440a30cb5d2af939828fd4ae3794e44f94df5a631ede42c1719bfdabf0253fe5175be898e750edc53370d2b",
+	"080000240022000a00140012001d00170018001901000101010201030104001c00024001000000000b0001b9000001b50001b0308201ac30820115a003020102020102300d06092a864886f70d01010b0500300e310c300a06035504031303727361301e170d3136303733303031323335395a170d3236303733303031323335395a300e310c300a0603550403130372736130819f300d06092a864886f70d010101050003818d0030818902818100b4bb498f8279303d980836399b36c6988c0c68de55e1bdb826d3901a2461eafd2de49a91d015abbc9a95137ace6c1af19eaa6af98c7ced43120998e187a80ee0ccb0524b1b018c3e0b63264d449a6d38e22a5fda430846748030530ef0461c8ca9d9efbfae8ea6d1d03e2bd193eff0ab9a8002c47428a6d35a8d88d79f7f1e3f0203010001a31a301830090603551d1304023000300b0603551d0f0404030205a0300d06092a864886f70d01010b05000381810085aad2a0e5b9276b908c65f73a7267170618a54c5f8a7b337d2df7a594365417f2eae8f8a58c8f8172f9319cf36b7fd6c55b80f21a03015156726096fd335e5e67f2dbf102702e608ccae6bec1fc63a42a99be5c3eb7107c3c54e9b9eb2bd5203b1c3b84e0a8b2f759409ba3eac9d91d402dcc0cc8f8961229ac9187b42b4de100000f000084080400805a747c5d88fa9bd2e55ab085a61015b7211f824cd484145ab3ff52f1fda8477b0b7abc90db78e2d33a5c141a078653fa6bef780c5ea248eeaaa785c4f394cab6d30bbe8d4859ee511f602957b15411ac027671459e46445c9ea58c181e818e95b8c3fb0bf3278409d3be152a3da5043e063dda65cdf5aea20d53dfacd42f74f3140000209b9b141d906337fbd2cbdce71df4deda4ab42c309572cb7fffee5454b78f0718",
+	"170303003575ec4dc238cce60b298044a71e219c56cc77b0517fe9b93c7a4bfc44d87f38f80338ac98fc46deb384bd1caeacab6867d726c40546",
+	"1703030043a23f7054b62c94d0affafe8228ba55cbefacea42f914aa66bcab3f2b9819a8a5b46b395bd54a9a20441e2b62974e1f5a6292a2977014bd1e3deae63aeebb21694915e4",
+	"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f3031",
+};
+
+#define H13_CHECK(cond, what) do { \
+		if (!(cond)) { \
+			fprintf(stderr, "TLS13_HS failed: %s\n", what); \
+			exit(EXIT_FAILURE); \
+		} \
+	} while (0)
+
+static void
+h13_expect(const char *what, const unsigned char *got, const char *hex)
+{
+	unsigned char ref[1024];
+	size_t len;
+
+	len = hextobin(ref, hex);
+	if (memcmp(got, ref, len) != 0) {
+		size_t u;
+
+		fprintf(stderr, "%s\n  got:", what);
+		for (u = 0; u < len; u ++) {
+			fprintf(stderr, "%02x", got[u]);
+		}
+		fprintf(stderr, "\n  ref: %s\n", hex);
+	}
+	H13_CHECK(memcmp(got, ref, len) == 0, what);
+}
+
+static void
+h13_add(br_ssl_engine_context *eng, const char *hex)
+{
+	unsigned char buf[1024];
+	size_t len;
+
+	len = hextobin(buf, hex);
+	br_multihash_update(&eng->mhash, buf, len);
+}
+
+static void
+test_TLS13_HS(void)
+{
+	static br_ssl_client_context cc;
+	br_ssl_engine_context *eng;
+	unsigned char buf[1024], pubA[133], privA[32], pubB[133], privB[32];
+	unsigned char sa[133], sb[133];
+	size_t len, n, xo, xl;
+	unsigned char *p;
+	int t;
+
+	printf("Test TLS 1.3 handshake helpers: ");
+	fflush(stdout);
+
+	memset(&cc, 0, sizeof cc);
+	eng = &cc.eng;
+	br_ssl_engine_set_hash(eng, br_sha256_ID, &br_sha256_vtable);
+	br_ssl_engine_set_hash(eng, br_sha384_ID, &br_sha384_vtable);
+	br_ssl_engine_set_ec(eng, &br_ec_all_m31);
+	br_ssl_engine_set_aes_ctr(eng, &br_aes_ct_ctr_vtable);
+	br_ssl_engine_set_ghash(eng, &br_ghash_ctmul);
+	br_ssl_engine_set_chacha20(eng, &br_chacha20_ct_run);
+	br_ssl_engine_set_poly1305(eng, &br_poly1305_ctmul_run);
+	br_hmac_drbg_init(&eng->rng, &br_sha256_vtable, "seed", 4);
+	eng->session.cipher_suite = 0x1301;
+	br_multihash_init(&eng->mhash);
+
+	/*
+	 * Key share generation: two shares, and the two ECDH results agree.
+	 */
+	len = br_ssl_engine_tls13_keygen(eng);
+	H13_CHECK(len == 32 && eng->tls13_curve == 29, "keygen x25519");
+	memcpy(pubA, eng->tls13_pub, len);
+	memcpy(privA, eng->tls13_priv, 32);
+	len = br_ssl_engine_tls13_keygen(eng);
+	H13_CHECK(len == 32, "keygen second");
+	memcpy(pubB, eng->tls13_pub, len);
+	memcpy(privB, eng->tls13_priv, 32);
+	H13_CHECK(memcmp(pubA, pubB, 32) != 0, "keygen distinct");
+	memcpy(sa, pubB, 32);
+	memcpy(sb, pubA, 32);
+	H13_CHECK(br_ec_all_m31.mul(sa, 32, privA, 32, 29)
+		&& br_ec_all_m31.mul(sb, 32, privB, 32, 29), "keygen mul");
+	xo = br_ec_all_m31.xoff(29, &xl);
+	H13_CHECK(memcmp(sa + xo, sb + xo, xl) == 0, "keygen ecdh agreement");
+
+	/*
+	 * RFC 8448 trace: our share is the RFC client key.
+	 */
+	len = hextobin(eng->tls13_priv, test13hs_vec.cpriv);
+	H13_CHECK(len == 32, "cpriv");
+	/*
+	 * The RFC gives the X25519 scalar in its native little-endian
+	 * encoding; the BearSSL EC API takes the scalar in big-endian.
+	 */
+	for (n = 0; n < 16; n ++) {
+		unsigned char tmp;
+
+		tmp = eng->tls13_priv[n];
+		eng->tls13_priv[n] = eng->tls13_priv[31 - n];
+		eng->tls13_priv[31 - n] = tmp;
+	}
+	len = hextobin(eng->tls13_pub, test13hs_vec.cpub);
+	eng->tls13_pub_len = (unsigned char)len;
+	eng->tls13_curve = 29;
+	eng->ecdhe_curve = 29;
+	eng->ecdhe_point_len = (unsigned char)hextobin(eng->ecdhe_point,
+		test13hs_vec.spub);
+	br_multihash_init(&eng->mhash);
+	h13_add(eng, test13hs_vec.ch);
+	h13_add(eng, test13hs_vec.sh);
+	H13_CHECK(br_ssl_engine_tls13_hs_keys(eng) == 0, "hs_keys");
+	h13_expect("client handshake traffic secret", eng->tls13_chs,
+		test13hs_vec.chs);
+	h13_expect("server handshake traffic secret", eng->tls13_shs,
+		test13hs_vec.shs);
+
+	/*
+	 * The server flight: records protected with the server handshake
+	 * keys; the plaintext is EE, Certificate, CertificateVerify, Finished.
+	 */
+	H13_CHECK(br_ssl_engine_switch13(eng, 1, 0x1301, eng->tls13_shs), "sw in");
+	n = hextobin(buf, test13hs_vec.srec);
+	H13_CHECK(buf[0] == 23 && br_dec16be(buf + 3) == n - 5, "record header");
+	H13_CHECK(eng->in.vtable13->check_length(&eng->in.vtable13, n - 5),
+		"check_length");
+	len = n - 5;
+	t = 0;
+	p = eng->in.vtable13->decrypt(&eng->in.vtable13, buf + 5, &len, &t);
+	H13_CHECK(p != NULL && t == 22, "decrypt server flight");
+	h13_expect("server flight plaintext", p, test13hs_vec.spay);
+	H13_CHECK(len == strlen(test13hs_vec.spay) / 2, "flight length");
+
+	/*
+	 * Server Finished: transcript up to CertificateVerify.
+	 */
+	h13_add(eng, test13hs_vec.ee);
+	h13_add(eng, test13hs_vec.cert);
+	h13_add(eng, test13hs_vec.cv);
+	H13_CHECK(br_ssl_engine_tls13_snapshot(eng), "snapshot");
+	H13_CHECK(br_ssl_engine_tls13_finished(eng, 0) == 32, "finished len");
+	h13_expect("server Finished", eng->pad, test13hs_vec.sfv);
+	memcpy(eng->pad + 256, eng->pad, 32);
+	H13_CHECK(br_ssl_engine_tls13_check_finished(eng, 32), "check ok");
+	eng->pad[256 + 17] ^= 0x04;
+	H13_CHECK(!br_ssl_engine_tls13_check_finished(eng, 32), "check bad");
+
+	/*
+	 * Application keys: transcript up to the server Finished.
+	 */
+	h13_add(eng, test13hs_vec.sfin);
+	H13_CHECK(br_ssl_engine_tls13_snapshot(eng), "snapshot 2");
+	H13_CHECK(br_ssl_engine_tls13_app_keys(eng), "app_keys");
+	h13_expect("client application traffic secret", eng->tls13_cap,
+		test13hs_vec.cap);
+	h13_expect("server application traffic secret", eng->tls13_sap,
+		test13hs_vec.sap);
+
+	/*
+	 * Client Finished, protected with the client handshake keys.
+	 */
+	H13_CHECK(br_ssl_engine_tls13_finished(eng, 1) == 32, "cfinished len");
+	h13_expect("client Finished", eng->pad, test13hs_vec.cfv);
+	H13_CHECK(br_ssl_engine_tls13_switch(eng, 0, 0), "sw out hs");
+	len = hextobin(buf + 5, test13hs_vec.cfin);
+	p = eng->out.vtable13->encrypt(&eng->out.vtable13, 22, buf + 5, &len);
+	H13_CHECK(len == 58, "client record length");
+	h13_expect("client Finished record", p, test13hs_vec.crec);
+
+	/*
+	 * Application data, with the application keys.
+	 */
+	H13_CHECK(br_ssl_engine_tls13_switch(eng, 0, 1), "sw out app");
+	len = hextobin(buf + 5, test13hs_vec.apay);
+	p = eng->out.vtable13->encrypt(&eng->out.vtable13, 23, buf + 5, &len);
+	H13_CHECK(len == 72, "app record length");
+	h13_expect("application record", p, test13hs_vec.arec);
+
+	printf("done.\n");
+	fflush(stdout);
+}
+
 #define STU(x)   { &test_ ## x, #x }
 
 static const struct {
@@ -9823,6 +10047,7 @@ static const struct {
 	STU(HKDF),
 	STU(TLS13_KS),
 	STU(TLS13_REC),
+	STU(TLS13_HS),
 	STU(SHAKE),
 	STU(HMAC_DRBG),
 	STU(AESCTR_DRBG),
