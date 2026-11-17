@@ -273,6 +273,8 @@ coresrc=" \
 	src/ssl/ssl_rec_ccm.c \
 	src/ssl/ssl_rec_chapol.c \
 	src/ssl/ssl_rec_gcm.c \
+	src/ssl/ssl_rec13_chapol.c \
+	src/ssl/ssl_rec13_gcm.c \
 	src/ssl/ssl_scert_single_ec.c \
 	src/ssl/ssl_scert_single_rsa.c \
 	src/ssl/ssl_server.c \

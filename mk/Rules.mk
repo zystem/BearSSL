@@ -224,6 +224,8 @@ OBJ = $(OBJSETTINGS) \
  $(OBJDIR)$Pssl_rec_ccm$O \
  $(OBJDIR)$Pssl_rec_chapol$O \
  $(OBJDIR)$Pssl_rec_gcm$O \
+ $(OBJDIR)$Pssl_rec13_chapol$O \
+ $(OBJDIR)$Pssl_rec13_gcm$O \
  $(OBJDIR)$Pssl_scert_single_ec$O \
  $(OBJDIR)$Pssl_scert_single_rsa$O \
  $(OBJDIR)$Pssl_server$O \
@@ -1040,6 +1042,12 @@ $(OBJDIR)$Pssl_rec_chapol$O: src$Pssl$Pssl_rec_chapol.c $(HEADERSPRIV) $(OBJSETT
 
 $(OBJDIR)$Pssl_rec_gcm$O: src$Pssl$Pssl_rec_gcm.c $(HEADERSPRIV) $(OBJSETTINGS)
 	$(CC) $(CFLAGS) $(INCFLAGS) $(CCOUT)$(OBJDIR)$Pssl_rec_gcm$O src$Pssl$Pssl_rec_gcm.c
+
+$(OBJDIR)$Pssl_rec13_chapol$O: src$Pssl$Pssl_rec13_chapol.c $(HEADERSPRIV) $(OBJSETTINGS)
+	$(CC) $(CFLAGS) $(INCFLAGS) $(CCOUT)$(OBJDIR)$Pssl_rec13_chapol$O src$Pssl$Pssl_rec13_chapol.c
+
+$(OBJDIR)$Pssl_rec13_gcm$O: src$Pssl$Pssl_rec13_gcm.c $(HEADERSPRIV) $(OBJSETTINGS)
+	$(CC) $(CFLAGS) $(INCFLAGS) $(CCOUT)$(OBJDIR)$Pssl_rec13_gcm$O src$Pssl$Pssl_rec13_gcm.c
 
 $(OBJDIR)$Pssl_scert_single_ec$O: src$Pssl$Pssl_scert_single_ec.c $(HEADERSPRIV) $(OBJSETTINGS)
 	$(CC) $(CFLAGS) $(INCFLAGS) $(CCOUT)$(OBJDIR)$Pssl_scert_single_ec$O src$Pssl$Pssl_scert_single_ec.c
