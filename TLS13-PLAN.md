@@ -33,7 +33,7 @@ Missing: any TLS 1.3 state, RSA-PSS signing, Ed25519, tickets/PSK, a record code
 | # | Step | Gate |
 |---|------|------|
 | 0 | Fork baseline builds and its tests pass | done 2026-11-17 |
-| 1 | Key schedule (HKDF-Expand-Label, secrets, transcript hash) as a standalone module | passes the RFC 8448 simple-handshake key values |
+| 1 | Key schedule (HKDF-Expand-Label, secrets, transcript hash) as a standalone module | passes the RFC 8448 simple-handshake key values. **Done 2026-11-17** for SHA-256 (`testcrypto TLS13_KS`: early, handshake and master secrets, handshake and application traffic secrets, keys, IVs, Finished keys, KeyUpdate in-place check; vectors generated from the RFC text). SHA-384 is not covered: RFC 8448 has no trace for it |
 | 2 | 1.3 record codecs (AES-GCM, ChaCha20-Poly1305: nonce from counter, inner type, padding) | encrypt/decrypt vectors from RFC 8448; round trip; bad-tag and bad-length tests |
 | 3 | Client handshake: ClientHello with key_share, ServerHello, EncryptedExtensions, Certificate, CertificateVerify, Finished | full RFC 8448 trace replayed with fixed randomness; interop with OpenSSL `s_server -tls1_3` |
 | 4 | HelloRetryRequest; downgrade protection | tests against OpenSSL with an unsupported first group |

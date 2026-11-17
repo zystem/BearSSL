@@ -236,6 +236,7 @@ OBJ = $(OBJSETTINGS) \
  $(OBJDIR)$Pssl_server_minr2g$O \
  $(OBJDIR)$Pssl_server_minu2g$O \
  $(OBJDIR)$Pssl_server_minv2g$O \
+ $(OBJDIR)$Pssl_tls13_ks$O \
  $(OBJDIR)$Paes_big_cbcdec$O \
  $(OBJDIR)$Paes_big_cbcenc$O \
  $(OBJDIR)$Paes_big_ctr$O \
@@ -1075,6 +1076,9 @@ $(OBJDIR)$Pssl_server_minu2g$O: src$Pssl$Pssl_server_minu2g.c $(HEADERSPRIV) $(O
 
 $(OBJDIR)$Pssl_server_minv2g$O: src$Pssl$Pssl_server_minv2g.c $(HEADERSPRIV) $(OBJSETTINGS)
 	$(CC) $(CFLAGS) $(INCFLAGS) $(CCOUT)$(OBJDIR)$Pssl_server_minv2g$O src$Pssl$Pssl_server_minv2g.c
+
+$(OBJDIR)$Pssl_tls13_ks$O: src$Pssl$Pssl_tls13_ks.c $(HEADERSPRIV) $(OBJSETTINGS)
+	$(CC) $(CFLAGS) $(INCFLAGS) $(CCOUT)$(OBJDIR)$Pssl_tls13_ks$O src$Pssl$Pssl_tls13_ks.c
 
 $(OBJDIR)$Paes_big_cbcdec$O: src$Psymcipher$Paes_big_cbcdec.c $(HEADERSPRIV) $(OBJSETTINGS)
 	$(CC) $(CFLAGS) $(INCFLAGS) $(CCOUT)$(OBJDIR)$Paes_big_cbcdec$O src$Psymcipher$Paes_big_cbcdec.c

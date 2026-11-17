@@ -9375,6 +9375,115 @@ eq_name(const char *s1, const char *s2)
 	}
 }
 
+/*
+ * Test vectors: RFC 8448, section 3 ("Simple 1-RTT Handshake"),
+ * TLS_AES_128_GCM_SHA256. Generated from the RFC text by a script, not
+ * typed by hand.
+ */
+static void
+test_TLS13_KS(void)
+{
+	br_tls13_ks_context kc;
+	unsigned char tmp[48], tmp2[48], th[32], iv[12], key[16];
+	size_t len;
+
+	printf("Test TLS 1.3 key schedule: ");
+	fflush(stdout);
+
+	/* early secret (no PSK) */
+	br_tls13_ks_init(&kc, &br_sha256_vtable, NULL, 0);
+	len = hextobin(tmp, "33ad0a1c607ec03b09e6cd9893680ce210adf300aa1f2660e1b22e10f170f92a");
+	check_equals("TLS13 early secret", kc.secret, tmp, len);
+	(void)len;
+	printf(".");
+	fflush(stdout);
+
+	/* handshake secret (x25519 shared secret as input) */
+	len = hextobin(tmp2, "8bd4054fb55b9d63fdfbacf9f04b9f0d35e6d63f537563efd46272900f89492d");
+	br_tls13_ks_advance(&kc, tmp2, len);
+	len = hextobin(tmp, "1dc826e93606aa6fdc0aadc12f741b01046aa6b99f691ed221a9f0ca043fbeac");
+	check_equals("TLS13 handshake secret", kc.secret, tmp, len);
+	printf(".");
+	fflush(stdout);
+
+	/* handshake traffic secrets */
+	hextobin(th, "860c06edc07858ee8e78f0e7428c58edd6b43f2ca3e6e95f02ed063cf0e1cad8");
+	br_tls13_derive_secret(&br_sha256_vtable, kc.secret,
+		"c hs traffic", th, tmp2);
+	len = hextobin(tmp, "b3eddb126e067f35a780b3abf45e2d8f3b1a950738f52e9600746a0e27a55a21");
+	check_equals("TLS13 client hs traffic", tmp2, tmp, len);
+	br_tls13_derive_secret(&br_sha256_vtable, kc.secret,
+		"s hs traffic", th, tmp2);
+	len = hextobin(tmp, "b67b7d690cc16c4e75e54213cb2d37b4e9c912bcded9105d42befd59d391ad38");
+	check_equals("TLS13 server hs traffic", tmp2, tmp, len);
+	printf(".");
+	fflush(stdout);
+
+	/* server handshake write key and IV; Finished keys */
+	br_tls13_traffic_keys(&br_sha256_vtable, tmp2, 16, key, iv);
+	len = hextobin(tmp, "3fce516009c21727d0f2e4e86ee403bc");
+	check_equals("TLS13 server hs key", key, tmp, len);
+	len = hextobin(tmp, "5d313eb2671276ee13000b30");
+	check_equals("TLS13 server hs iv", iv, tmp, len);
+	br_tls13_finished_key(&br_sha256_vtable, tmp2, tmp);
+	len = hextobin(tmp2, "008d3b66f816ea559f96b537e885c31fc068bf492c652f01f288a1d8cdc19fc8");
+	check_equals("TLS13 server finished key", tmp, tmp2, len);
+	br_tls13_derive_secret(&br_sha256_vtable, kc.secret,
+		"c hs traffic", th, tmp2);
+	br_tls13_finished_key(&br_sha256_vtable, tmp2, tmp);
+	len = hextobin(tmp2, "b80ad01015fb2f0bd65ff7d4da5d6bf83f84821d1f87fdc7d3c75b5a7b42d9c4");
+	check_equals("TLS13 client finished key", tmp, tmp2, len);
+	printf(".");
+	fflush(stdout);
+
+	/* master secret (no input) */
+	br_tls13_ks_advance(&kc, NULL, 0);
+	len = hextobin(tmp, "18df06843d13a08bf2a449844c5f8a478001bc4d4c627984d5a41da8d0402919");
+	check_equals("TLS13 master secret", kc.secret, tmp, len);
+	printf(".");
+	fflush(stdout);
+
+	/* application traffic secrets, keys and IVs */
+	hextobin(th, "9608102a0f1ccc6db6250b7b7e417b1a000eaada3daae4777a7686c9ff83df13");
+	br_tls13_derive_secret(&br_sha256_vtable, kc.secret,
+		"s ap traffic", th, tmp2);
+	len = hextobin(tmp, "a11af9f05531f856ad47116b45a950328204b4f44bfb6b3a4b4f1f3fcb631643");
+	check_equals("TLS13 server ap traffic", tmp2, tmp, len);
+	br_tls13_traffic_keys(&br_sha256_vtable, tmp2, 16, key, iv);
+	len = hextobin(tmp, "9f02283b6c9c07efc26bb9f2ac92e356");
+	check_equals("TLS13 server ap key", key, tmp, len);
+	len = hextobin(tmp, "cf782b88dd83549aadf1e984");
+	check_equals("TLS13 server ap iv", iv, tmp, len);
+	br_tls13_derive_secret(&br_sha256_vtable, kc.secret,
+		"c ap traffic", th, tmp2);
+	len = hextobin(tmp, "9e40646ce79a7f9dc05af8889bce6552875afa0b06df0087f792ebb7c17504a5");
+	check_equals("TLS13 client ap traffic", tmp2, tmp, len);
+	br_tls13_traffic_keys(&br_sha256_vtable, tmp2, 16, key, iv);
+	len = hextobin(tmp, "17422dda596ed5d9acd890e3c63f5051");
+	check_equals("TLS13 client ap key", key, tmp, len);
+	len = hextobin(tmp, "5b78923dee08579033e523d9");
+	check_equals("TLS13 client ap iv", iv, tmp, len);
+	printf(".");
+	fflush(stdout);
+
+	/*
+	 * KeyUpdate chain: in place and out of place must give the same
+	 * result, and the result must differ from the input.
+	 */
+	len = hextobin(tmp, "9e40646ce79a7f9dc05af8889bce6552875afa0b06df0087f792ebb7c17504a5");
+	memcpy(tmp2, tmp, len);
+	br_tls13_next_traffic_secret(&br_sha256_vtable, tmp, th);
+	br_tls13_next_traffic_secret(&br_sha256_vtable, tmp, tmp);
+	check_equals("TLS13 traffic upd in place", tmp, th, 32);
+	if (memcmp(tmp, tmp2, 32) == 0) {
+		fprintf(stderr, "TLS13 traffic upd: output equals input\n");
+		exit(EXIT_FAILURE);
+	}
+	printf(" done.\n");
+	fflush(stdout);
+}
+
+
 #define STU(x)   { &test_ ## x, #x }
 
 static const struct {
@@ -9391,6 +9500,7 @@ static const struct {
 	STU(multihash),
 	STU(HMAC),
 	STU(HKDF),
+	STU(TLS13_KS),
 	STU(SHAKE),
 	STU(HMAC_DRBG),
 	STU(AESCTR_DRBG),
