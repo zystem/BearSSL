@@ -85,7 +85,8 @@ make_pms_rsa(br_ssl_client_context *ctx, int prf_id)
 	 * Make PMS.
 	 */
 	pms = ctx->eng.pad + nlen - 48;
-	br_enc16be(pms, ctx->eng.version_max);
+	br_enc16be(pms, ctx->eng.version_max > BR_TLS12
+			? BR_TLS12 : ctx->eng.version_max);
 	br_hmac_drbg_generate(&ctx->eng.rng, pms + 2, 46);
 	br_ssl_engine_compute_master(&ctx->eng, prf_id, pms, 48);
 
@@ -354,6 +355,12 @@ addr-ctx: hashes
 addr-ctx: auth_type
 addr-ctx: hash_id
 
+\ True if the ClientHello offers TLS 1.3. This is the case for the first
+\ handshake only (there is no renegotiation in TLS 1.3), and if the highest
+\ supported version is above TLS 1.2.
+: tls13-offered? ( -- bool )
+	addr-version_max get16 0x0303 > addr-reneg get8 0= and ;
+
 \ Length of the Secure Renegotiation extension. This is 5 for the
 \ first handshake, 17 for a renegotiation (if the server supports the
 \ extension), or 0 if we know that the server does not support the
@@ -369,12 +376,65 @@ addr-ctx: hash_id
 : ext-frag-length ( -- len )
 	addr-log_max_frag_len get8 14 = if 0 else 5 then ;
 
-\ Length of Signatures extension.
+\ Length of Signatures extension. When TLS 1.3 is offered, the extension
+\ also lists rsa_pss_rsae_sha256 and rsa_pss_rsae_sha384 if RSA signatures
+\ can be verified.
 : ext-signatures-length ( -- len )
 	supported-hash-functions { num } drop 0
 	supports-rsa-sign? if num + then
 	supports-ecdsa? if num + then
-	dup if 1 << 6 + then ;
+	1 <<
+	tls13-offered? supports-rsa-sign? and if 4 + then
+	dup if 6 + then ;
+
+\ Length of Supported Versions extension: TLS 1.3, then each version from
+\ TLS 1.2 down to the minimum version.
+: ext-versions-length ( -- len )
+	tls13-offered? if
+		addr-version_min get16 dup 0x0303 > if
+			drop 0
+		else
+			0x0303 swap - 1+
+		then
+		1+ 1 << 5 +
+	else
+		0
+	then ;
+
+\ Write the Supported Versions extension (if offering TLS 1.3).
+: write-ext-versions ( -- )
+	ext-versions-length if
+		0x002B write16
+		ext-versions-length 4 - dup write16
+		1- write8
+		0x0304 write16
+		addr-version_min get16 0x0303 <= if
+			0x0303
+			begin dup addr-version_min get16 >= while
+				dup write16 1-
+			repeat
+			drop
+		then
+	then ;
+
+\ Length of the Key Share extension (one share), or 0 if not offering
+\ TLS 1.3.
+: ext-keyshare-length ( -- len )
+	tls13-offered? if addr-tls13_pub_len get8 10 + else 0 then ;
+
+\ Write the Key Share extension. The group identifier is the same as the
+\ curve identifier (23 for P-256, 29 for X25519).
+: write-ext-keyshare ( -- )
+	ext-keyshare-length dup if
+		0x0033 write16
+		4 - dup write16
+		2 - write16
+		addr-tls13_curve get8 write16
+		addr-tls13_pub_len get8 write16
+		addr-tls13_pub addr-tls13_pub_len get8 write-blob
+	else
+		drop
+	then ;
 
 \ Write supported hash functions ( sign -- )
 : write-hashes
@@ -425,12 +485,21 @@ cc: ext-ALPN-length ( -- len ) {
 : write-ClientHello ( -- )
 	{ ; total-ext-length }
 
+	\ When offering TLS 1.3, make our key share, and do not propose a
+	\ TLS 1.2 session for resumption (the server must echo our session ID,
+	\ and there is no resumption in this TLS 1.3 version).
+	tls13-offered? if
+		tls13-keygen ifnot ERR_INVALID_ALGORITHM fail then
+		0 addr-session_id_len set8
+	then
+
 	\ Compute length for extensions (without the general two-byte header).
 	\ This does not take padding extension into account.
 	ext-reneg-length ext-sni-length + ext-frag-length +
 	ext-signatures-length +
 	ext-supported-curves-length + ext-point-format-length +
 	ext-ALPN-length +
+	ext-versions-length + ext-keyshare-length +
 	>total-ext-length
 
 	\ ClientHello type
@@ -458,8 +527,8 @@ cc: ext-ALPN-length ( -- len ) {
 	{ ext-padding-amount }
 	write24
 
-	\ Protocol version
-	addr-version_max get16 write16
+	\ Protocol version (the legacy field is at most TLS 1.2)
+	addr-version_max get16 dup 0x0303 > if drop 0x0303 then write16
 
 	\ Client random
 	addr-client_random 4 bzero
@@ -513,6 +582,10 @@ cc: ext-ALPN-length ( -- len ) {
 			2 - write16             \ list length
 			supports-ecdsa? if 3 write-hashes then
 			supports-rsa-sign? if 1 write-hashes then
+			tls13-offered? supports-rsa-sign? and if
+				0x0804 write16
+				0x0805 write16
+			then
 		then
 		\ TODO: add an API to specify preference order for curves.
 		\ Right now we send Curve25519 first, then other curves in
@@ -553,6 +626,8 @@ cc: ext-ALPN-length ( -- len ) {
 		else
 			drop
 		then
+		write-ext-versions
+		write-ext-keyshare
 		ext-padding-amount 0< ifnot
 			0x0015 write16          \ extension value (21)
 			ext-padding-amount
@@ -624,6 +699,17 @@ cc: ext-ALPN-length ( -- len ) {
 		1+ addr-selected_protocol set16
 	then ;
 
+\ Parse the server's key share (TLS 1.3 ServerHello): a group and one
+\ public value. They are saved as the ECDHE curve and point.
+: read-server-keyshare ( lim -- lim )
+	read16 open-elt
+	read16 dup 255 > if ERR_BAD_PARAM fail then
+	addr-ecdhe_curve set8
+	read16 dup 133 > if ERR_BAD_PARAM fail then
+	dup addr-ecdhe_point_len set8
+	addr-ecdhe_point swap read-blob
+	close-elt ;
+
 \ Save a value in a 16-bit field, or check it in case of session resumption.
 : check-resume ( val addr resume -- )
 	if get16 = ifnot ERR_RESUME_MISMATCH fail then else set16 then ;
@@ -663,14 +749,29 @@ cc: DEBUG-BLOB ( addr len -- ) {
 
 	\ Server random.
 	addr-server_random 32 read-blob
+	\ A HelloRetryRequest is not supported yet.
+	tls13-offered? if
+		server-random-kind 1 = if ERR_UNSUPPORTED_VERSION fail then
+	then
 
 	\ The "session resumption" flag.
 	0 { resume }
+
+	\ Set when the server selects TLS 1.3 (supported_versions extension),
+	\ and when it sent a key share.
+	0 { is13 }
+	0 { got-keyshare }
 
 	\ Session ID.
 	read8 { idlen }
 	idlen 32 > if ERR_OVERSIZED_ID fail then
 	addr-pad idlen read-blob
+
+	\ Did the server echo our session ID (required for TLS 1.3)?
+	idlen addr-session_id_len get8 =
+	idlen 0> if addr-session_id addr-pad idlen memcmp and then
+	{ echo-ok }
+
 	idlen addr-session_id_len get8 = idlen 0 > and if
 		addr-session_id addr-pad idlen memcmp if
 			\ Server session ID is non-empty and matches what
@@ -714,6 +815,8 @@ cc: DEBUG-BLOB ( addr len -- ) {
 		ext-supported-curves-length { ok-curves }
 		ext-point-format-length { ok-points }
 		ext-ALPN-length { ok-ALPN }
+		ext-versions-length { ok-versions }
+		ext-keyshare-length { ok-keyshare }
 		begin dup while
 			read16
 			case
@@ -788,6 +891,29 @@ cc: DEBUG-BLOB ( addr len -- ) {
 					read-ALPN-from-server
 				endof
 
+				\ Supported Versions: the server selects TLS 1.3.
+				0x002B of
+					ok-versions ifnot
+						ERR_EXTRA_EXTENSION fail
+					then
+					0 >ok-versions
+					read16 2 = ifnot ERR_BAD_PARAM fail then
+					read16 0x0304 = ifnot
+						ERR_UNSUPPORTED_VERSION fail
+					then
+					-1 >is13
+				endof
+
+				\ Key Share.
+				0x0033 of
+					ok-keyshare ifnot
+						ERR_EXTRA_EXTENSION fail
+					then
+					0 >ok-keyshare
+					-1 >got-keyshare
+					read-server-keyshare
+				endof
+
 				ERR_EXTRA_EXTENSION fail
 			endcase
 		repeat
@@ -808,6 +934,28 @@ cc: DEBUG-BLOB ( addr len -- ) {
 		\ this is a renegotiation).
 		ext-reneg-length 5 > if ERR_BAD_SECRENEG fail then
 		1 addr-reneg set8
+	then
+
+	is13 if
+		\ TLS 1.3: a key share, a TLS 1.3 suite and the echoed session ID
+		\ are required. There is no session resumption.
+		got-keyshare ifnot ERR_BAD_HANDSHAKE fail then
+		echo-ok ifnot ERR_BAD_HANDSHAKE fail then
+		addr-cipher_suite get16 8 u>> 0x13 = ifnot
+			ERR_BAD_CIPHER_SUITE fail
+		then
+		0x0304 addr-version set16
+		0 addr-session_id_len set8
+		0 >resume
+	else
+		\ Not TLS 1.3: the suite must not be a TLS 1.3 one, and the
+		\ downgrade sentinel must not be present if we support TLS 1.3.
+		addr-cipher_suite get16 8 u>> 0x13 = if
+			ERR_BAD_CIPHER_SUITE fail
+		then
+		addr-version_max get16 0x0303 > if
+			server-random-kind 2 >= if ERR_BAD_VERSION fail then
+		then
 	then
 	close-elt
 	resume
@@ -1140,6 +1288,18 @@ cc: do-client-sign ( -- sig_len ) {
 
 \ =======================================================================
 
+\ TLS 1.3 handshake of the client, after the ServerHello. Interim version
+\ (step 3c): it derives and installs the handshake keys and checks that
+\ the server's next message, now protected, is an EncryptedExtensions; then
+\ it stops with an error.
+: do-handshake13 ( -- )
+	tls13-hs-keys dup if fail then drop
+	1 0 tls13-switch
+	0 0 tls13-switch
+	read-handshake-header 8 = ifnot ERR_UNEXPECTED fail then
+	drop
+	ERR_BAD_STATE fail ;
+
 \ Perform a handshake.
 : do-handshake ( -- )
 	0 addr-application_data set8
@@ -1151,6 +1311,9 @@ cc: do-client-sign ( -- sig_len ) {
 	flush-record
 	read-ServerHello
 
+	addr-version get16 0x0304 = if
+		drop do-handshake13
+	else
 	if
 		\ Session resumption.
 		-1 read-CCS-Finished
@@ -1218,6 +1381,7 @@ cc: do-client-sign ( -- sig_len ) {
 
 		-1 write-CCS-Finished
 		-1 read-CCS-Finished
+	then
 	then
 
 	\ Now we should be invoked only in case of renegotiation.

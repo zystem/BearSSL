@@ -86,6 +86,11 @@ extern "C" {
 #define BR_TLS11   0x0302
 /** \brief Protocol version: TLS 1.2. */
 #define BR_TLS12   0x0303
+/**
+ * \brief Protocol version: TLS 1.3 (client only, in this fork; see
+ * `bearssl_tls13.h`).
+ */
+#define BR_TLS13   0x0304
 
 /*
  * Error constants. They are used to report the reason why a context has
@@ -1031,7 +1036,7 @@ typedef struct {
 		const unsigned char *ip;
 	} cpu;
 	uint32_t dp_stack[32];
-	uint32_t rp_stack[32];
+	uint32_t rp_stack[48];
 	unsigned char pad[512];
 
 	/*

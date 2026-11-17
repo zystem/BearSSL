@@ -259,6 +259,7 @@ extern const cipher_suite cipher_suites[];
 #define REQ_ECDHE_RSA      0x0400   /* suite uses ECDHE_RSA key exchange */
 #define REQ_ECDHE_ECDSA    0x0800   /* suite uses ECDHE_ECDSA key exchange */
 #define REQ_ECDH           0x1000   /* suite uses static ECDH key exchange */
+#define REQ_TLS13          0x2000   /* TLS 1.3 suite */
 
 /*
  * Parse a list of cipher suite names. The names are comma-separated. If

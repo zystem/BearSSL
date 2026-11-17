@@ -30,6 +30,7 @@ const protocol_version protocol_versions[] = {
 	{ "tls10", BR_TLS10, "TLS 1.0" },
 	{ "tls11", BR_TLS11, "TLS 1.1" },
 	{ "tls12", BR_TLS12, "TLS 1.2" },
+	{ "tls13", BR_TLS13, "TLS 1.3" },
 	{ NULL, 0, NULL }
 };
 
@@ -46,6 +47,27 @@ const hash_function hash_functions[] = {
 
 /* see brssl.h */
 const cipher_suite cipher_suites[] = {
+	{
+		"TLS13_AES_128_GCM_SHA256",
+		0x1301,
+		REQ_TLS13 | REQ_ECDHE_RSA | REQ_ECDHE_ECDSA
+			| REQ_AESGCM | REQ_SHA256,
+		"TLS 1.3, AES-128/GCM + SHA-256"
+	},
+	{
+		"TLS13_AES_256_GCM_SHA384",
+		0x1302,
+		REQ_TLS13 | REQ_ECDHE_RSA | REQ_ECDHE_ECDSA
+			| REQ_AESGCM | REQ_SHA384,
+		"TLS 1.3, AES-256/GCM + SHA-384"
+	},
+	{
+		"TLS13_CHACHA20_POLY1305_SHA256",
+		0x1303,
+		REQ_TLS13 | REQ_ECDHE_RSA | REQ_ECDHE_ECDSA
+			| REQ_CHAPOL | REQ_SHA256,
+		"TLS 1.3, ChaCha20+Poly1305 + SHA-256"
+	},
 	{
 		"ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
 		BR_TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,

@@ -1244,6 +1244,21 @@ br_ssl_engine_recvrec_ack(br_ssl_engine_context *cc, size_t len)
 	if (buf != NULL) {
 		switch (cc->record_type_in) {
 		case BR_SSL_CHANGE_CIPHER_SPEC:
+			if (cc->tls13_in) {
+				/*
+				 * TLS 1.3 compatibility mode: a plaintext
+				 * ChangeCipherSpec record (one byte of
+				 * value 1) is ignored.
+				 */
+				if (len != 1 || buf[0] != 1) {
+					br_ssl_engine_fail(cc, BR_ERR_BAD_CCS);
+					break;
+				}
+				recvpld_ack(cc, len);
+				break;
+			}
+			jump_handshake(cc, 0);
+			break;
 		case BR_SSL_ALERT:
 		case BR_SSL_HANDSHAKE:
 			jump_handshake(cc, 0);
