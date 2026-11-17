@@ -2294,6 +2294,19 @@ void br_ssl_engine_switch_gcm_in(br_ssl_engine_context *cc,
 	const br_block_ctr_class *bc_impl, size_t cipher_key_len);
 
 /*
+ * Switch to TLS 1.3 record protection, for incoming ('for_input' non-zero)
+ * or outgoing records, with the keys and IV derived from a traffic secret.
+ *    cc          the engine context
+ *    for_input   non-zero for incoming records
+ *    suite       TLS 1.3 cipher suite (0x1301, 0x1302 or 0x1303)
+ *    secret      traffic secret (hash output length bytes)
+ * Returned value is 1 on success, 0 if the suite is unknown or an
+ * implementation (hash, AES-CTR, GHASH, ChaCha20, Poly1305) is not set.
+ */
+int br_ssl_engine_switch13(br_ssl_engine_context *cc, int for_input,
+	unsigned suite, const void *secret);
+
+/*
  * Switch to GCM encryption for outgoing records.
  *    cc               the engine context
  *    is_client        non-zero for a client, zero for a server

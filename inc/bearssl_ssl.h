@@ -33,6 +33,7 @@
 #include "bearssl_hmac.h"
 #include "bearssl_prf.h"
 #include "bearssl_rand.h"
+#include "bearssl_tls13.h"
 #include "bearssl_x509.h"
 
 #ifdef __cplusplus
@@ -875,6 +876,17 @@ typedef struct {
 	unsigned char incrypt;
 
 	/*
+	 * TLS 1.3 record protection (see bearssl_tls13.h). When 'tls13_in'
+	 * is non-zero, the incoming protected records use the in.vtable13
+	 * codec (inner content type); 'in_enc' tells whether the record being
+	 * received is protected (compatibility ChangeCipherSpec records
+	 * are not). 'tls13_out' is the same for outgoing records.
+	 */
+	unsigned char tls13_in;
+	unsigned char tls13_out;
+	unsigned char in_enc;
+
+	/*
 	 * Shutdown flag: when set to non-zero, incoming record bytes
 	 * will not be accepted anymore. This is used after a close_notify
 	 * has been received: afterwards, the engine no longer claims that
@@ -914,18 +926,24 @@ typedef struct {
 	 */
 	union {
 		const br_sslrec_in_class *vtable;
+		const br_sslrec13_in_class *vtable13;
 		br_sslrec_in_cbc_context cbc;
 		br_sslrec_gcm_context gcm;
 		br_sslrec_chapol_context chapol;
 		br_sslrec_ccm_context ccm;
+		br_sslrec13_gcm_context gcm13;
+		br_sslrec13_chapol_context chapol13;
 	} in;
 	union {
 		const br_sslrec_out_class *vtable;
+		const br_sslrec13_out_class *vtable13;
 		br_sslrec_out_clear_context clear;
 		br_sslrec_out_cbc_context cbc;
 		br_sslrec_gcm_context gcm;
 		br_sslrec_chapol_context chapol;
 		br_sslrec_ccm_context ccm;
+		br_sslrec13_gcm_context gcm13;
+		br_sslrec13_chapol_context chapol13;
 	} out;
 
 	/*
