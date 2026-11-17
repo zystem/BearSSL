@@ -10029,6 +10029,188 @@ test_TLS13_HS(void)
 	fflush(stdout);
 }
 
+static const struct {
+	const char *cpriv;
+	const char *cpub;
+	const char *ch;
+	const char *shrec;
+	const char *flightrec;
+	const char *cert;
+	const char *cfinrec;
+	const char *nstrec;
+	const char *capay;
+	const char *carec;
+	const char *sapay;
+	const char *sarec;
+} test13rp_vec = {
+	"49af42ba7f7994852d713ef2784bcbcaa7911de26adc5642cb634540e7ea5005",
+	"99381de560e4bd43d23d8e435a7dbafeb3c06e51c13cae4d5413691e529aaf2c",
+	"010000c00303cb34ecb1e78163ba1c38c6dacb196a6dffa21a8d9912ec18a2ef6283024dece7000006130113031302010000910000000b0009000006736572766572ff01000100000a00140012001d0017001800190100010101020103010400230000003300260024001d002099381de560e4bd43d23d8e435a7dbafeb3c06e51c13cae4d5413691e529aaf2c002b0003020304000d0020001e040305030603020308040805080604010501060102010402050206020202002d00020101001c00024001",
+	"160303005a020000560303a6af06a4121860dc5e6e60249cd34c95930c8ac5cb1434dac155772ed3e2692800130100002e00330024001d0020c9828876112095fe66762bdbf7c672e156d6cc253b833df1dd69b1b04e751f0f002b00020304",
+	"17030302a2d1ff334a56f5bff6594a07cc87b580233f500f45e489e7f33af35edf7869fcf40aa40aa2b8ea73f848a7ca07612ef9f945cb960b4068905123ea78b111b429ba9191cd05d2a389280f526134aadc7fc78c4b729df828b5ecf7b13bd9aefb0e57f271585b8ea9bb355c7c79020716cfb9b1183ef3ab20e37d57a6b9d7477609aee6e122a4cf51427325250c7d0e509289444c9b3a648f1d71035d2ed65b0e3cdd0cbae8bf2d0b227812cbb360987255cc744110c453baa4fcd610928d809810e4b7ed1a8fd991f06aa6248204797e36a6a73b70a2559c09ead686945ba246ab66e5edd8044b4c6de3fcf2a89441ac66272fd8fb330ef8190579b3684596c960bd596eea520a56a8d650f563aad27409960dca63d3e688611ea5e22f4415cf9538d51a200c27034272968a264ed6540c84838d89f72c24461aad6d26f59ecaba9acbbb317b66d902f4f292a36ac1b639c637ce343117b659622245317b49eeda0c6258f100d7d961ffb138647e92ea330faeea6dfa31c7a84dc3bd7e1b7a6c7178af36879018e3f252107f243d243dc7339d5684c8b0378bf30244da8c87c843f5e56eb4c5e8280a2b48052cf93b16499a66db7cca71e4599426f7d461e66f99882bd89fc50800becca62d6c74116dbd2972fda1fa80f85df881edbe5a37668936b335583b599186dc5c6918a396fa48a181d6b6fa4f9d62d513afbb992f2b992f67f8afe67f76913fa388cb5630c8ca01e0c65d11c66a1e2ac4c85977b7c7a6999bbf10dc35ae69f5515614636c0b9b68c19ed2e31c0b3b66763038ebba42f3b38edc0399f3a9f23faa63978c317fc9fa66a73f60f0504de93b5b845e275592c12335ee340bbc4fddd502784016e4b3be7ef04dda49f4b440a30cb5d2af939828fd4ae3794e44f94df5a631ede42c1719bfdabf0253fe5175be898e750edc53370d2b",
+	"0b0001b9000001b50001b0308201ac30820115a003020102020102300d06092a864886f70d01010b0500300e310c300a06035504031303727361301e170d3136303733303031323335395a170d3236303733303031323335395a300e310c300a0603550403130372736130819f300d06092a864886f70d010101050003818d0030818902818100b4bb498f8279303d980836399b36c6988c0c68de55e1bdb826d3901a2461eafd2de49a91d015abbc9a95137ace6c1af19eaa6af98c7ced43120998e187a80ee0ccb0524b1b018c3e0b63264d449a6d38e22a5fda430846748030530ef0461c8ca9d9efbfae8ea6d1d03e2bd193eff0ab9a8002c47428a6d35a8d88d79f7f1e3f0203010001a31a301830090603551d1304023000300b0603551d0f0404030205a0300d06092a864886f70d01010b05000381810085aad2a0e5b9276b908c65f73a7267170618a54c5f8a7b337d2df7a594365417f2eae8f8a58c8f8172f9319cf36b7fd6c55b80f21a03015156726096fd335e5e67f2dbf102702e608ccae6bec1fc63a42a99be5c3eb7107c3c54e9b9eb2bd5203b1c3b84e0a8b2f759409ba3eac9d91d402dcc0cc8f8961229ac9187b42b4de10000",
+	"170303003575ec4dc238cce60b298044a71e219c56cc77b0517fe9b93c7a4bfc44d87f38f80338ac98fc46deb384bd1caeacab6867d726c40546",
+	"17030300de3a6b8f90414a97d6959c3487680de5134a2b240e6cffac116e95d41d6af8f6b580dcf3d11d63c758db289a015940252f55713e061dc13e078891a38efbcf5753ad8ef170ad3c7353d16d9da773b9ca7f2b9fa1b6c0d4a3d03f75e09c30ba1e62972ac46f75f7b981be63439b2999ce13064615139891d5e4c5b406f16e3fc181a77ca475840025db2f0a77f81b5ab05b94c01346755f69232c86519d86cbeeac87aac347d143f9605d64f650db4d023e70e952ca49fe5137121c74bc2697687e248746d6df353005f3bce18696129c8153556b3b6c6779b37bf15985684f",
+	"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f3031",
+	"1703030043a23f7054b62c94d0affafe8228ba55cbefacea42f914aa66bcab3f2b9819a8a5b46b395bd54a9a20441e2b62974e1f5a6292a2977014bd1e3deae63aeebb21694915e4",
+	"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f3031",
+	"17030300432e937e11ef4ac740e538ad36005fc4a46932fc3225d05f82aa1b36e30efaf97d90e6dffc602dcb501a59a8fcc49c4bf2e5f0a21c0047c2abf332540dd032e167c2955d",
+};
+
+static size_t
+rp_feed(br_ssl_engine_context *eng, const char *hex)
+{
+	unsigned char buf[1024];
+	size_t len, off;
+
+	len = hextobin(buf, hex);
+	off = 0;
+	while (off < len) {
+		unsigned char *b;
+		size_t blen, clen;
+
+		b = br_ssl_engine_recvrec_buf(eng, &blen);
+		H13_CHECK(b != NULL && blen > 0, "replay: engine does not accept bytes");
+		clen = len - off;
+		if (clen > blen) {
+			clen = blen;
+		}
+		memcpy(b, buf + off, clen);
+		br_ssl_engine_recvrec_ack(eng, clen);
+		off += clen;
+	}
+	return len;
+}
+
+/*
+ * Replay of the RFC 8448 "simple 1-RTT" trace against the client engine.
+ * The client random and key share are those of the RFC (the test installs
+ * the RFC private key and replaces the ClientHello in the transcript by the
+ * RFC one, since our ClientHello has other extensions). The server
+ * certificate is checked through a known-key X.509 context made from the
+ * certificate of the trace, so its validity period and trust are not
+ * tested here.
+ */
+static void
+test_TLS13_REPLAY(void)
+{
+	static br_ssl_client_context cc;
+	static br_x509_minimal_context xc;
+	static unsigned char iobuf[BR_SSL_BUFSIZE_BIDI];
+	br_x509_knownkey_context kk;
+	br_x509_decoder_context dc;
+	br_ssl_engine_context *eng;
+	unsigned char buf[1024], ref[1024], cert[1024];
+	static const uint16_t suites[] = { 0x1301 };
+	unsigned char *b;
+	size_t len, n, clen, u;
+
+	printf("Test TLS 1.3 replay of RFC 8448: ");
+	fflush(stdout);
+
+	/*
+	 * Server public key from the RFC certificate message: type (1),
+	 * length (3), request context length (1), list length (3), then the
+	 * first certificate with its 3-byte length.
+	 */
+	n = hextobin(buf, test13rp_vec.cert);
+	H13_CHECK(buf[0] == 11 && buf[4] == 0, "replay: certificate message");
+	clen = ((size_t)buf[8] << 16) | ((size_t)buf[9] << 8) | buf[10];
+	H13_CHECK(11 + clen <= n && clen <= sizeof cert, "replay: cert length");
+	memcpy(cert, buf + 11, clen);
+	br_x509_decoder_init(&dc, 0, 0);
+	br_x509_decoder_push(&dc, cert, clen);
+	H13_CHECK(br_x509_decoder_last_error(&dc) == 0
+		&& br_x509_decoder_get_pkey(&dc) != NULL
+		&& br_x509_decoder_get_pkey(&dc)->key_type == BR_KEYTYPE_RSA,
+		"replay: decode certificate");
+	br_x509_knownkey_init_rsa(&kk,
+		&br_x509_decoder_get_pkey(&dc)->key.rsa, BR_KEYTYPE_SIGN);
+
+	br_ssl_client_init_full(&cc, &xc, NULL, 0);
+	eng = &cc.eng;
+	br_ssl_engine_set_versions(eng, BR_TLS12, BR_TLS13);
+	br_ssl_engine_set_suites(eng, suites, 1);
+	br_ssl_engine_set_x509(eng, &kk.vtable);
+	br_ssl_engine_set_buffer(eng, iobuf, sizeof iobuf, 1);
+	H13_CHECK(br_ssl_client_reset(&cc, "server", 0), "replay: reset");
+
+	/*
+	 * Our ClientHello goes out; then the RFC state is installed.
+	 */
+	b = br_ssl_engine_sendrec_buf(eng, &len);
+	H13_CHECK(b != NULL && b[0] == 22 && b[5] == 1, "replay: ClientHello");
+	br_ssl_engine_sendrec_ack(eng, len);
+	H13_CHECK(eng->tls13_curve == 29 && eng->tls13_pub_len == 32,
+		"replay: X25519 share");
+	n = hextobin(eng->tls13_priv, test13rp_vec.cpriv);
+	for (u = 0; u < 16; u ++) {
+		unsigned char tmp;
+
+		tmp = eng->tls13_priv[u];
+		eng->tls13_priv[u] = eng->tls13_priv[31 - u];
+		eng->tls13_priv[31 - u] = tmp;
+	}
+	hextobin(eng->tls13_pub, test13rp_vec.cpub);
+	br_multihash_init(&eng->mhash);
+	h13_add(eng, test13rp_vec.ch);
+
+	/*
+	 * ServerHello, then the encrypted server flight.
+	 */
+	rp_feed(eng, test13rp_vec.shrec);
+	H13_CHECK(br_ssl_engine_last_error(eng) == 0, "replay: ServerHello");
+	rp_feed(eng, test13rp_vec.flightrec);
+	if (br_ssl_engine_last_error(eng) != 0) {
+		fprintf(stderr, "replay: engine error %d\n",
+			br_ssl_engine_last_error(eng));
+	}
+	H13_CHECK(br_ssl_engine_last_error(eng) == 0,
+		"replay: server flight accepted");
+
+	/*
+	 * Our Finished must be the one of the RFC trace, byte for byte.
+	 */
+	b = br_ssl_engine_sendrec_buf(eng, &len);
+	H13_CHECK(b != NULL, "replay: no client Finished");
+	n = hextobin(ref, test13rp_vec.cfinrec);
+	H13_CHECK(len == n && memcmp(b, ref, n) == 0, "replay: client Finished");
+	br_ssl_engine_sendrec_ack(eng, len);
+	H13_CHECK((br_ssl_engine_current_state(eng) & BR_SSL_SENDAPP) != 0,
+		"replay: handshake not complete");
+
+	/*
+	 * The server's NewSessionTicket is accepted and ignored.
+	 */
+	rp_feed(eng, test13rp_vec.nstrec);
+	H13_CHECK(br_ssl_engine_last_error(eng) == 0, "replay: NewSessionTicket");
+
+	/*
+	 * Application data in both directions.
+	 */
+	b = br_ssl_engine_sendapp_buf(eng, &len);
+	n = hextobin(buf, test13rp_vec.capay);
+	H13_CHECK(b != NULL && len >= n, "replay: sendapp");
+	memcpy(b, buf, n);
+	br_ssl_engine_sendapp_ack(eng, n);
+	br_ssl_engine_flush(eng, 0);
+	b = br_ssl_engine_sendrec_buf(eng, &len);
+	n = hextobin(ref, test13rp_vec.carec);
+	H13_CHECK(b != NULL && len == n && memcmp(b, ref, n) == 0,
+		"replay: client application record");
+	br_ssl_engine_sendrec_ack(eng, len);
+
+	rp_feed(eng, test13rp_vec.sarec);
+	H13_CHECK(br_ssl_engine_last_error(eng) == 0, "replay: server app record");
+	b = br_ssl_engine_recvapp_buf(eng, &len);
+	n = hextobin(ref, test13rp_vec.sapay);
+	H13_CHECK(b != NULL && len == n && memcmp(b, ref, n) == 0,
+		"replay: server application data");
+
+	printf("done.\n");
+	fflush(stdout);
+}
+
 #define STU(x)   { &test_ ## x, #x }
 
 static const struct {
@@ -10048,6 +10230,7 @@ static const struct {
 	STU(TLS13_KS),
 	STU(TLS13_REC),
 	STU(TLS13_HS),
+	STU(TLS13_REPLAY),
 	STU(SHAKE),
 	STU(HMAC_DRBG),
 	STU(AESCTR_DRBG),

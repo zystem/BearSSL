@@ -422,6 +422,10 @@ addr-ctx: hash_id
 : ext-keyshare-length ( -- len )
 	tls13-offered? if addr-tls13_pub_len get8 10 + else 0 then ;
 
+\ Length of the record_size_limit extension (offered with TLS 1.3).
+: ext-rsl-length ( -- len )
+	tls13-offered? if 6 else 0 then ;
+
 \ Write the Key Share extension. The group identifier is the same as the
 \ curve identifier (23 for P-256, 29 for X25519).
 : write-ext-keyshare ( -- )
@@ -499,7 +503,7 @@ cc: ext-ALPN-length ( -- len ) {
 	ext-signatures-length +
 	ext-supported-curves-length + ext-point-format-length +
 	ext-ALPN-length +
-	ext-versions-length + ext-keyshare-length +
+	ext-versions-length + ext-keyshare-length + ext-rsl-length +
 	>total-ext-length
 
 	\ ClientHello type
@@ -628,6 +632,11 @@ cc: ext-ALPN-length ( -- len ) {
 		then
 		write-ext-versions
 		write-ext-keyshare
+		ext-rsl-length if
+			0x001C write16
+			0x0002 write16
+			rsl-value write16
+		then
 		ext-padding-amount 0< ifnot
 			0x0015 write16          \ extension value (21)
 			ext-padding-amount
@@ -1288,6 +1297,11 @@ cc: do-client-sign ( -- sig_len ) {
 
 \ =======================================================================
 
+\ Parse the server's record_size_limit (EncryptedExtensions).
+: read-server-rsl ( lim -- lim )
+	read16 2 = ifnot ERR_BAD_PARAM fail then
+	read16 apply-peer-rsl ;
+
 \ Read EncryptedExtensions (TLS 1.3). The extensions that the server may
 \ send in answer to ours are processed as in TLS 1.2; the server may also
 \ send its supported groups, which are ignored.
@@ -1297,9 +1311,17 @@ cc: do-client-sign ( -- sig_len ) {
 	ext-sni-length { ok-sni }
 	ext-frag-length { ok-frag }
 	ext-ALPN-length { ok-ALPN }
+	\ We offered record_size_limit with TLS 1.3 (tls13-offered? is no longer
+	\ true here: the renegotiation flag was set by the ServerHello).
+	-1 { ok-rsl }
 	begin dup while
 		read16
 		case
+			0x001C of
+				ok-rsl ifnot ERR_EXTRA_EXTENSION fail then
+				0 >ok-rsl
+				read-server-rsl
+			endof
 			0x0000 of
 				ok-sni ifnot ERR_EXTRA_EXTENSION fail then
 				0 >ok-sni
