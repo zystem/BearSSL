@@ -2333,7 +2333,7 @@ int br_ssl_engine_tls13_switch(br_ssl_engine_context *cc,
  *   with the next one and install the new keys.
  */
 int br_ssl_engine_tls13_verify_cv(br_ssl_engine_context *cc,
-	unsigned alg, size_t sig_len);
+	unsigned alg, size_t sig_len, int by_server);
 int br_ssl_engine_tls13_key_update(br_ssl_engine_context *cc, int for_input);
 
 /*
@@ -2347,6 +2347,27 @@ int br_ssl_engine_tls13_key_update(br_ssl_engine_context *cc, int for_input);
  *   followed by the HelloRetryRequest. Returns 0 or a BR_ERR_* code.
  */
 size_t br_ssl_client_tls13_sign(br_ssl_client_context *cc, unsigned *alg);
+
+/*
+ * Server side TLS 1.3 helpers.
+ * server_choose: call the policy handler's choose13 with the client's
+ *   acceptable signature algorithms; sets the chain and the scheme
+ *   (sign_hash_id). Returns 1 on success.
+ * server_pick_suite: first TLS 1.3 suite of the translated client suite
+ *   list (0 if none); it becomes the session cipher suite.
+ * server_pick_group: group to ask for in a HelloRetryRequest (0 if the
+ *   client and we have no common group).
+ * server_sign: sign the CertificateVerify content (the transcript
+ *   snapshot must be up to date) into the pad; returns the length (0 on
+ *   error) and the scheme in *alg.
+ * srv_hrr_restart: replace the transcript, which is ClientHello1, by
+ *   message_hash(ClientHello1).
+ */
+int br_ssl_server_tls13_choose(br_ssl_server_context *cc, uint32_t sig_algs);
+unsigned br_ssl_server_tls13_pick_suite(br_ssl_server_context *cc);
+unsigned br_ssl_server_tls13_pick_group(br_ssl_server_context *cc);
+size_t br_ssl_server_tls13_sign(br_ssl_server_context *cc, unsigned *alg);
+int br_ssl_engine_tls13_srv_hrr_restart(br_ssl_engine_context *cc);
 size_t br_ssl_engine_tls13_keygen_group(br_ssl_engine_context *cc, int curve);
 void br_ssl_engine_tls13_save_ch1(br_ssl_engine_context *cc);
 int br_ssl_engine_tls13_hrr_restart(br_ssl_engine_context *cc);

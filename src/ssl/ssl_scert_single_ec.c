@@ -77,6 +77,58 @@ se_choose(const br_ssl_server_policy_class **pctx,
 	return 0;
 }
 
+/*
+ * TLS 1.3: ECDSA with P-256/SHA-256, P-384/SHA-384 or P-521/SHA-512 (bits
+ * 12 to 14); the curve of the key decides.
+ */
+static int
+se_choose13(const br_ssl_server_policy_class **pctx,
+	const br_ssl_server_context *cc, uint32_t sig_algs,
+	br_ssl_server_choices *choices)
+{
+	br_ssl_server_policy_ec_context *pc;
+	int h;
+
+	pc = (br_ssl_server_policy_ec_context *)pctx;
+	if ((pc->allowed_usages & BR_KEYTYPE_SIGN) == 0) {
+		return 0;
+	}
+	switch (pc->sk->curve) {
+	case BR_EC_secp256r1: h = 4; break;
+	case BR_EC_secp384r1: h = 5; break;
+	case BR_EC_secp521r1: h = 6; break;
+	default:
+		return 0;
+	}
+	if (((sig_algs >> (8 + h)) & 1) == 0
+		|| br_multihash_getimpl(&cc->eng.mhash, h) == NULL)
+	{
+		return 0;
+	}
+	choices->algo_id = (h << 8) | 3;
+	choices->chain = pc->chain;
+	choices->chain_len = pc->chain_len;
+	return 1;
+}
+
+static size_t
+se_do_sign13(const br_ssl_server_policy_class **pctx,
+	const br_hash_class *hf, const br_prng_class **rng,
+	const unsigned char *hv, size_t hv_len,
+	unsigned char *sig, size_t sig_len)
+{
+	br_ssl_server_policy_ec_context *pc;
+	unsigned char tmp[64];
+
+	(void)rng;
+	pc = (br_ssl_server_policy_ec_context *)pctx;
+	if (hv_len > sizeof tmp || sig_len < 139) {
+		return 0;
+	}
+	memcpy(tmp, hv, hv_len);
+	return pc->iecdsa(pc->iec, hf, tmp, pc->sk, sig);
+}
+
 static uint32_t
 se_do_keyx(const br_ssl_server_policy_class **pctx,
 	unsigned char *data, size_t *len)
@@ -118,7 +170,9 @@ static const br_ssl_server_policy_class se_policy_vtable = {
 	sizeof(br_ssl_server_policy_ec_context),
 	se_choose,
 	se_do_keyx,
-	se_do_sign
+	se_do_sign,
+	se_choose13,
+	se_do_sign13
 };
 
 /* see bearssl_ssl.h */

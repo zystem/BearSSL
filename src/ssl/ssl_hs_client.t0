@@ -1252,19 +1252,6 @@ cc: tls13-client-sign ( -- alg len ) {
 	T0_PUSH((uint32_t)n);
 }
 
-\ Total length of the chain in a TLS 1.3 Certificate message: each
-\ certificate has a 3-byte length and an empty (2-byte) extension list.
-cc: tls13-chain-length ( -- len ) {
-	size_t u;
-	uint32_t total;
-
-	total = 0;
-	for (u = 0; u < ENG->chain_len; u ++) {
-		total += 5 + (uint32_t)ENG->chain[u].data_len;
-	}
-	T0_PUSH(total);
-}
-
 \ Parse CertificateRequest. Header has already been read.
 : read-contents-CertificateRequest ( lim -- )
 	\ Read supported client authentication types. We keep only
@@ -1581,26 +1568,6 @@ cc: do-client-sign ( -- sig_len ) {
 	alg siglen tls13-verify-cv
 	dup if fail then drop ;
 
-\ Write the client Certificate message of TLS 1.3: the request context of
-\ the server, then the chain (possibly empty), each certificate with an
-\ empty extension list.
-: write-Certificate13 ( -- )
-	11 write8
-	tls13-chain-length dup
-	addr-tls13_creq_len get8 + 4 + write24
-	addr-tls13_creq_len get8 write8
-	addr-tls13_creq addr-tls13_creq_len get8 write-blob
-	write24
-	begin
-		begin-cert
-		dup 0< if drop ret then write24
-		begin copy-cert-chunk dup while
-			addr-pad swap write-blob
-		repeat
-		drop
-		0 write16
-	again ;
-
 \ Write CertificateVerify (client, TLS 1.3); the snapshot of the transcript
 \ must be up to date.
 : write-CertificateVerify13 ( -- )
@@ -1669,43 +1636,6 @@ cc: do-client-sign ( -- sig_len ) {
 
 	1 addr-application_data set8
 	23 addr-record_type_out set8 ;
-
-\ Process a handshake message received after the TLS 1.3 handshake:
-\ NewSessionTicket is ignored (no resumption yet); KeyUpdate is applied
-\ and, if requested, answered.
-: read-post-handshake13 ( -- )
-	read-handshake-header
-	case
-		4 of
-			dup skip-blob
-			close-elt
-		endof
-		24 of
-			read8 { request }
-			close-elt
-			request 1 > if ERR_BAD_PARAM fail then
-			-1 tls13-key-update
-			request if
-				22 wait-rectype-out
-				24 write8 1 write24 0 write8
-				flush-record
-				0 tls13-key-update
-				23 wait-rectype-out
-			then
-		endof
-		ERR_UNEXPECTED fail
-	endcase ;
-
-\ Main loop after a TLS 1.3 handshake. There is no renegotiation.
-: main13 ( -- ! )
-	begin
-		wait-co
-		dup 0x07 and case
-			0x00 of drop endof
-			0x01 of drop read-post-handshake13 endof
-			ERR_UNEXPECTED fail
-		endcase
-	again ;
 
 \ After a HelloRetryRequest: restart the transcript, send the second
 \ ClientHello (renegotiation flag cleared: it is a first handshake) and

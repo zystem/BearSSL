@@ -198,6 +198,9 @@ addr-eng: selected_protocol
 addr-eng: tls13_pub
 addr-eng: tls13_pub_len
 addr-eng: tls13_curve
+addr-eng: tls13_server
+addr-eng: tls13_initial
+addr-eng: tls13_neg
 addr-eng: tls13_creq_len
 addr-eng: tls13_creq
 addr-eng: tls13_hrr
@@ -356,7 +359,15 @@ cc: tls13-verify-cv ( alg sig-len -- err ) {
 	size_t sig_len = T0_POP();
 	unsigned alg = T0_POP();
 
-	T0_PUSH((uint32_t)br_ssl_engine_tls13_verify_cv(ENG, alg, sig_len));
+	T0_PUSH((uint32_t)br_ssl_engine_tls13_verify_cv(ENG, alg, sig_len, 1));
+}
+
+\ Verify the client's CertificateVerify (server role).
+cc: tls13-verify-client-cv ( alg sig-len -- err ) {
+	size_t sig_len = T0_POP();
+	unsigned alg = T0_POP();
+
+	T0_PUSH((uint32_t)br_ssl_engine_tls13_verify_cv(ENG, alg, sig_len, 0));
 }
 
 \ Compute the server's Finished from the snapshot, and compare it with the
@@ -377,6 +388,27 @@ cc: tls13-finished-out ( -- len ) {
 		T0_CO();
 	}
 	T0_PUSH((uint32_t)n);
+}
+
+\ Compute the Finished of one side from the snapshot, in the pad; returns
+\ its length. The argument is non-zero for the client's Finished.
+cc: tls13-finished-gen ( from-client -- len ) {
+	int from_client = T0_POPi();
+	size_t n = br_ssl_engine_tls13_finished(ENG, from_client);
+
+	if (n == 0) {
+		br_ssl_engine_fail(ENG, BR_ERR_BAD_STATE);
+		T0_CO();
+	}
+	T0_PUSH((uint32_t)n);
+}
+
+\ Compute the client's Finished from the snapshot and compare it with the
+\ received one (pad + 256). True if they are equal.
+cc: tls13-check-finished-client ( -- bool ) {
+	size_t n = br_ssl_engine_tls13_finished(ENG, 1);
+
+	T0_PUSHi(-(n != 0 && br_ssl_engine_tls13_check_finished(ENG, n)));
 }
 
 \ Compute the master secret and the application traffic secrets.
@@ -1591,3 +1623,77 @@ cc: test-protocol-name ( len -- n ) {
 	}
 	T0_PUSHi(-1);
 }
+
+\ =======================================================================
+\ TLS 1.3 words shared by client and server.
+
+\ Total length of the chain in a TLS 1.3 Certificate message: each
+\ certificate has a 3-byte length and an empty (2-byte) extension list.
+cc: tls13-chain-length ( -- len ) {
+	size_t u;
+	uint32_t total;
+
+	total = 0;
+	for (u = 0; u < ENG->chain_len; u ++) {
+		total += 5 + (uint32_t)ENG->chain[u].data_len;
+	}
+	T0_PUSH(total);
+}
+
+\ Write the client Certificate message of TLS 1.3: the request context of
+\ the server, then the chain (possibly empty), each certificate with an
+\ empty extension list.
+: write-Certificate13 ( -- )
+	11 write8
+	tls13-chain-length dup
+	addr-tls13_creq_len get8 + 4 + write24
+	addr-tls13_creq_len get8 write8
+	addr-tls13_creq addr-tls13_creq_len get8 write-blob
+	write24
+	begin
+		begin-cert
+		dup 0< if drop ret then write24
+		begin copy-cert-chunk dup while
+			addr-pad swap write-blob
+		repeat
+		drop
+		0 write16
+	again ;
+
+\ Process a handshake message received after the TLS 1.3 handshake:
+\ NewSessionTicket is ignored (no resumption yet); KeyUpdate is applied
+\ and, if requested, answered.
+: read-post-handshake13 ( -- )
+	read-handshake-header
+	case
+		4 of
+			dup skip-blob
+			close-elt
+		endof
+		24 of
+			read8 { request }
+			close-elt
+			request 1 > if ERR_BAD_PARAM fail then
+			-1 tls13-key-update
+			request if
+				22 wait-rectype-out
+				24 write8 1 write24 0 write8
+				flush-record
+				0 tls13-key-update
+				23 wait-rectype-out
+			then
+		endof
+		ERR_UNEXPECTED fail
+	endcase ;
+
+\ Main loop after a TLS 1.3 handshake. There is no renegotiation.
+: main13 ( -- ! )
+	begin
+		wait-co
+		dup 0x07 and case
+			0x00 of drop endof
+			0x01 of drop read-post-handshake13 endof
+			ERR_UNEXPECTED fail
+		endcase
+	again ;
+

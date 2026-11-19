@@ -281,11 +281,17 @@ int
 br_ssl_engine_tls13_switch(br_ssl_engine_context *cc, int for_input, int app)
 {
 	const unsigned char *secret;
+	int from_client;
 
-	if (for_input) {
-		secret = app ? cc->tls13_sap : cc->tls13_shs;
-	} else {
+	/*
+	 * The client's secrets protect what the client sends: the incoming
+	 * records for a server, the outgoing records for a client.
+	 */
+	from_client = for_input ? cc->tls13_server : !cc->tls13_server;
+	if (from_client) {
 		secret = app ? cc->tls13_cap : cc->tls13_chs;
+	} else {
+		secret = app ? cc->tls13_sap : cc->tls13_shs;
 	}
 	return br_ssl_engine_switch13(cc, for_input,
 		cc->session.cipher_suite, secret);
@@ -308,9 +314,11 @@ br_ssl_engine_tls13_check_finished(br_ssl_engine_context *cc, size_t len)
 /* see inner.h */
 int
 br_ssl_engine_tls13_verify_cv(br_ssl_engine_context *cc,
-	unsigned alg, size_t sig_len)
+	unsigned alg, size_t sig_len, int by_server)
 {
-	static const char ctx_string[] = "TLS 1.3, server CertificateVerify";
+	static const char ctx_server[] = "TLS 1.3, server CertificateVerify";
+	static const char ctx_client[] = "TLS 1.3, client CertificateVerify";
+	const char *ctx_string = by_server ? ctx_server : ctx_client;
 	const br_x509_class **xc;
 	const br_x509_pkey *pk;
 	const br_hash_class *dig;
@@ -345,7 +353,7 @@ br_ssl_engine_tls13_verify_cv(br_ssl_engine_context *cc,
 	zero = 0;
 	dig->init(&hc.vtable);
 	dig->update(&hc.vtable, spaces, sizeof spaces);
-	dig->update(&hc.vtable, ctx_string, sizeof ctx_string - 1);
+	dig->update(&hc.vtable, ctx_string, 33);
 	dig->update(&hc.vtable, &zero, 1);
 	dig->update(&hc.vtable, cc->tls13_th, cc->tls13_hlen);
 	dig->out(&hc.vtable, hv);
@@ -388,7 +396,8 @@ br_ssl_engine_tls13_key_update(br_ssl_engine_context *cc, int for_input)
 	if (dig == NULL) {
 		return 0;
 	}
-	secret = for_input ? cc->tls13_sap : cc->tls13_cap;
+	secret = (for_input ? cc->tls13_server : !cc->tls13_server)
+		? cc->tls13_cap : cc->tls13_sap;
 	br_tls13_next_traffic_secret(dig, secret, secret);
 	return br_ssl_engine_tls13_switch(cc, for_input, 1);
 }
@@ -430,4 +439,133 @@ br_ssl_client_tls13_sign(br_ssl_client_context *cc, unsigned *alg)
 	n = (*cc->client_auth_vtable)->do_sign13(cc->client_auth_vtable,
 		hash_id, &eng->rng.vtable, hv, hlen, eng->pad, sizeof eng->pad);
 	return n;
+}
+
+/* see inner.h */
+int
+br_ssl_server_tls13_choose(br_ssl_server_context *cc, uint32_t sig_algs)
+{
+	br_ssl_server_choices choices;
+
+	if (cc->policy_vtable == NULL
+		|| (*cc->policy_vtable)->choose13 == 0)
+	{
+		return 0;
+	}
+	memset(&choices, 0, sizeof choices);
+	if (!(*cc->policy_vtable)->choose13(cc->policy_vtable, cc,
+		sig_algs, &choices))
+	{
+		return 0;
+	}
+	cc->sign_hash_id = (uint16_t)choices.algo_id;
+	cc->eng.chain = choices.chain;
+	cc->eng.chain_len = choices.chain_len;
+	return 1;
+}
+
+/* see inner.h */
+unsigned
+br_ssl_server_tls13_pick_suite(br_ssl_server_context *cc)
+{
+	size_t u;
+
+	for (u = 0; u < BR_MAX_CIPHER_SUITES; u ++) {
+		unsigned suite;
+
+		suite = cc->client_suites[u][0];
+		if ((suite >> 8) == 0x13 && suite >= 0x1301 && suite <= 0x1303) {
+			cc->eng.session.cipher_suite = (uint16_t)suite;
+			return suite;
+		}
+	}
+	return 0;
+}
+
+/* see inner.h */
+unsigned
+br_ssl_server_tls13_pick_group(br_ssl_server_context *cc)
+{
+	static const unsigned char pref[] = { 29, 23, 24, 25 };
+	uint32_t common;
+	size_t u;
+	unsigned g;
+
+	if (cc->eng.iec == NULL) {
+		return 0;
+	}
+	common = cc->curves & cc->eng.iec->supported_curves;
+	for (u = 0; u < sizeof pref; u ++) {
+		if (((common >> pref[u]) & 1) != 0) {
+			return pref[u];
+		}
+	}
+	for (g = 0; g < 32; g ++) {
+		if (((common >> g) & 1) != 0) {
+			return g;
+		}
+	}
+	return 0;
+}
+
+/* see inner.h */
+size_t
+br_ssl_server_tls13_sign(br_ssl_server_context *cc, unsigned *alg)
+{
+	static const char ctx_string[] = "TLS 1.3, server CertificateVerify";
+	br_ssl_engine_context *eng;
+	const br_hash_class *dig;
+	br_hash_compat_context hc;
+	unsigned char spaces[64], zero, hv[64];
+	size_t hlen;
+	unsigned a, hash_id;
+
+	eng = &cc->eng;
+	a = cc->sign_hash_id;
+	hash_id = ((a >> 8) == 8) ? (a & 0xFF) : (a >> 8);
+	dig = br_multihash_getimpl(&eng->mhash, (int)hash_id);
+	if (dig == NULL || cc->policy_vtable == NULL
+		|| (*cc->policy_vtable)->do_sign13 == 0)
+	{
+		return 0;
+	}
+	*alg = a;
+	memset(spaces, 0x20, sizeof spaces);
+	zero = 0;
+	dig->init(&hc.vtable);
+	dig->update(&hc.vtable, spaces, sizeof spaces);
+	dig->update(&hc.vtable, ctx_string, sizeof ctx_string - 1);
+	dig->update(&hc.vtable, &zero, 1);
+	dig->update(&hc.vtable, eng->tls13_th, eng->tls13_hlen);
+	dig->out(&hc.vtable, hv);
+	hlen = br_digest_size(dig);
+	return (*cc->policy_vtable)->do_sign13(cc->policy_vtable, dig,
+		&eng->rng.vtable, hv, hlen, eng->pad, sizeof eng->pad);
+}
+
+/* see inner.h */
+int
+br_ssl_engine_tls13_srv_hrr_restart(br_ssl_engine_context *cc)
+{
+	const br_hash_class *dig;
+	int hash_id;
+	unsigned char hdr[4], h1[48];
+	size_t hlen;
+
+	dig = suite_hash(cc, &hash_id);
+	if (dig == NULL) {
+		return BR_ERR_BAD_CIPHER_SUITE;
+	}
+	hlen = br_digest_size(dig);
+	if (br_multihash_out(&cc->mhash, hash_id, h1) != hlen) {
+		return BR_ERR_BAD_STATE;
+	}
+	hdr[0] = 254;
+	hdr[1] = 0;
+	hdr[2] = 0;
+	hdr[3] = (unsigned char)hlen;
+	br_multihash_init(&cc->mhash);
+	br_multihash_update(&cc->mhash, hdr, sizeof hdr);
+	br_multihash_update(&cc->mhash, h1, hlen);
+	return 0;
 }

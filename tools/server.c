@@ -609,11 +609,93 @@ sp_do_sign(const br_ssl_server_policy_class **pctx,
 	}
 }
 
+/*
+ * TLS 1.3: RSA-PSS (bits 20 to 22) or ECDSA (bits 12 to 14); the curve of
+ * an EC key decides the ECDSA hash.
+ */
+static int
+sp_choose13(const br_ssl_server_policy_class **pctx,
+	const br_ssl_server_context *cc, uint32_t sig_algs,
+	br_ssl_server_choices *choices)
+{
+	policy_context *pc;
+	int h;
+
+	(void)cc;
+	pc = (policy_context *)pctx;
+	h = 0;
+	if (pc->sk->key_type == BR_KEYTYPE_RSA) {
+		for (h = 4; h <= 6; h ++) {
+			if (((sig_algs >> (16 + h)) & 1) != 0) {
+				break;
+			}
+		}
+		if (h > 6) {
+			h = 0;
+		} else {
+			choices->algo_id = 0x0800 + h;
+		}
+	} else if (pc->sk->key_type == BR_KEYTYPE_EC) {
+		switch (pc->sk->key.ec.curve) {
+		case BR_EC_secp256r1: h = 4; break;
+		case BR_EC_secp384r1: h = 5; break;
+		case BR_EC_secp521r1: h = 6; break;
+		}
+		if (h != 0 && ((sig_algs >> (8 + h)) & 1) == 0) {
+			h = 0;
+		}
+		if (h != 0) {
+			choices->algo_id = (h << 8) | 3;
+		}
+	}
+	if (h == 0) {
+		if (pc->verbose) {
+			fprintf(stderr, "no matching signature algorithm\n");
+		}
+		return 0;
+	}
+	choices->chain = pc->chain;
+	choices->chain_len = pc->chain_len;
+	return 1;
+}
+
+static size_t
+sp_do_sign13(const br_ssl_server_policy_class **pctx,
+	const br_hash_class *hf, const br_prng_class **rng,
+	const unsigned char *hv, size_t hv_len,
+	unsigned char *sig, size_t sig_len)
+{
+	policy_context *pc;
+
+	pc = (policy_context *)pctx;
+	switch (pc->sk->key_type) {
+		size_t n;
+
+	case BR_KEYTYPE_RSA:
+		n = (pc->sk->key.rsa.n_bitlen + 7) >> 3;
+		if (sig_len < n) {
+			return 0;
+		}
+		return br_rsa_pss_sign_get_default()(rng, hf, hf, hv,
+			hv_len, &pc->sk->key.rsa, sig) ? n : 0;
+	case BR_KEYTYPE_EC:
+		if (sig_len < 139) {
+			return 0;
+		}
+		return br_ecdsa_sign_asn1_get_default()(
+			br_ec_get_default(), hf, hv, &pc->sk->key.ec, sig);
+	default:
+		return 0;
+	}
+}
+
 static const br_ssl_server_policy_class policy_vtable = {
 	sizeof(policy_context),
 	sp_choose,
 	sp_do_keyx,
-	sp_do_sign
+	sp_do_sign,
+	sp_choose13,
+	sp_do_sign13
 };
 
 void
@@ -931,9 +1013,10 @@ do_server(int argc, char *argv[])
 		num_suites = 0;
 
 		for (u = 0; cipher_suites[u].name; u ++) {
-			if ((cipher_suites[u].req & REQ_TLS13) == 0
-				&& ((cipher_suites[u].req & REQ_TLS12) == 0
-				|| vmax >= BR_TLS12))
+			if (((cipher_suites[u].req & REQ_TLS12) == 0
+				|| vmax >= BR_TLS12)
+				&& ((cipher_suites[u].req & REQ_TLS13) == 0
+				|| vmax >= BR_TLS13))
 			{
 				num_suites ++;
 			}
@@ -941,9 +1024,10 @@ do_server(int argc, char *argv[])
 		suites = xmalloc(num_suites * sizeof *suites);
 		num_suites = 0;
 		for (u = 0; cipher_suites[u].name; u ++) {
-			if ((cipher_suites[u].req & REQ_TLS13) == 0
-				&& ((cipher_suites[u].req & REQ_TLS12) == 0
-				|| vmax >= BR_TLS12))
+			if (((cipher_suites[u].req & REQ_TLS12) == 0
+				|| vmax >= BR_TLS12)
+				&& ((cipher_suites[u].req & REQ_TLS13) == 0
+				|| vmax >= BR_TLS13))
 			{
 				suites[num_suites ++] = cipher_suites[u];
 			}
@@ -1035,6 +1119,12 @@ do_server(int argc, char *argv[])
 		if ((req & REQ_TLS12) != 0 && vmax < BR_TLS12) {
 			fprintf(stderr,
 				"ERROR: cipher suite %s requires TLS 1.2\n",
+				suites[u].name);
+			goto server_exit_error;
+		}
+		if ((req & REQ_TLS13) != 0 && vmax < BR_TLS13) {
+			fprintf(stderr,
+				"ERROR: cipher suite %s requires TLS 1.3\n",
 				suites[u].name);
 			goto server_exit_error;
 		}

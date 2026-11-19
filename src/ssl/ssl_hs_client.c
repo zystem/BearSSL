@@ -2258,7 +2258,7 @@ br_ssl_hs_client_run(void *t0ctx)
 	size_t sig_len = T0_POP();
 	unsigned alg = T0_POP();
 
-	T0_PUSH((uint32_t)br_ssl_engine_tls13_verify_cv(ENG, alg, sig_len));
+	T0_PUSH((uint32_t)br_ssl_engine_tls13_verify_cv(ENG, alg, sig_len, 1));
 
 				}
 				break;

@@ -1057,6 +1057,9 @@ typedef struct {
 	unsigned char tls13_th[48];
 
 	/* Request context of a TLS 1.3 CertificateRequest (to be echoed). */
+	unsigned char tls13_server;
+	unsigned char tls13_initial;
+	unsigned char tls13_neg;
 	unsigned char tls13_creq_len;
 	unsigned char tls13_creq[255];
 
@@ -3354,6 +3357,38 @@ struct br_ssl_server_policy_class_ {
 	size_t (*do_sign)(const br_ssl_server_policy_class **pctx,
 		unsigned algo_id,
 		unsigned char *data, size_t hv_len, size_t len);
+
+	/**
+	 * \brief Choose a certificate and a signature algorithm for TLS 1.3.
+	 *
+	 * `sig_algs` is the list of the signature algorithms that the
+	 * client accepts, in the format of `br_ssl_server_get_client_hashes()`:
+	 * bit `8 + h` (12 to 14) for ECDSA with SHA-256, SHA-384, SHA-512
+	 * (`h` is the hash identifier 4, 5, 6; the curve is the one of the
+	 * hash), bit `16 + h` (20 to 22) for RSA-PSS (`rsae`) with SHA-256,
+	 * SHA-384, SHA-512. On success, the function returns 1, and sets
+	 * `choices->algo_id` to the TLS signature scheme (for instance
+	 * `0x0403` or `0x0804`) and `chain`, `chain_len`; it returns 0 if
+	 * no certificate and algorithm fit. A `NULL` method means that
+	 * the handler cannot be used with TLS 1.3.
+	 */
+	int (*choose13)(const br_ssl_server_policy_class **pctx,
+		const br_ssl_server_context *cc, uint32_t sig_algs,
+		br_ssl_server_choices *choices);
+
+	/**
+	 * \brief Sign for TLS 1.3 (CertificateVerify).
+	 *
+	 * `hf` is the hash function of the signature scheme, `hv` the hash
+	 * (of `hv_len` bytes) of the signed content. RSA-PSS (salt length
+	 * equal to the hash length, `rng` for the salt) or ECDSA (ASN.1
+	 * format) is used according to the key. Returned value is the
+	 * signature length (0 on error).
+	 */
+	size_t (*do_sign13)(const br_ssl_server_policy_class **pctx,
+		const br_hash_class *hf, const br_prng_class **rng,
+		const unsigned char *hv, size_t hv_len,
+		unsigned char *sig, size_t sig_len);
 };
 
 /**
@@ -3376,6 +3411,7 @@ typedef struct {
 	unsigned allowed_usages;
 	br_rsa_private irsacore;
 	br_rsa_pkcs1_sign irsasign;
+	br_rsa_pss_sign irsapss;
 #endif
 } br_ssl_server_policy_rsa_context;
 
