@@ -747,6 +747,12 @@ cc: tls13-sigalgs-list ( -- len ) {
 	0x0304 addr-version set16
 	0x0303 addr-version_in set16
 	0x0303 addr-version_out set16
+	\ ALPN first, as with TLS 1.2: a refusal is reported before the policy
+	\ handler is called.
+	addr-selected_protocol get16 0xFFFF = if
+		3 flag? if 120 fail-alert then
+		0 addr-selected_protocol set16
+	then
 	tls13-srv-pick-suite ifnot 40 fail-alert then
 	addr-hashes get32 tls13-srv-choose ifnot 40 fail-alert then
 	addr-ecdhe_point_len get8 if
@@ -762,10 +768,6 @@ cc: tls13-sigalgs-list ( -- len ) {
 		addr-tls13_hrr get8 if 47 fail-alert then
 		tls13-srv-pick-group dup ifnot drop 40 fail-alert then
 		addr-tls13_hrr_group set8
-	then
-	addr-selected_protocol get16 0xFFFF = if
-		3 flag? if 120 fail-alert then
-		0 addr-selected_protocol set16
 	then ;
 
 \ Read and drop ClientHello. This is used when a client-triggered

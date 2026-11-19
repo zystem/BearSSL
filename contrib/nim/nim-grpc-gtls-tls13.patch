@@ -1,0 +1,72 @@
+--- a/src/nimgrpc/tls/gtls.c	2026-11-15 16:43:24.883443973 +0200
++++ b/src/nimgrpc/tls/gtls.c	2026-11-19 23:38:37.493641150 +0200
+@@ -516,8 +516,26 @@
+     gtls_conn *t = (gtls_conn *)((char *)pctx - offsetof(gtls_conn, policy_vt));
+     return (*t->inner)->do_sign(t->inner, algo_id, data, hv_len, len);
+ }
++/* TLS 1.3: the same ALPN rule, then the inner policy's choice and signature. */
++static int policy_choose13(const br_ssl_server_policy_class **pctx, const br_ssl_server_context *cc,
++                           uint32_t sig_algs, br_ssl_server_choices *choices) {
++    gtls_conn *t = (gtls_conn *)((char *)pctx - offsetof(gtls_conn, policy_vt));
++    if (br_ssl_engine_get_selected_protocol((br_ssl_engine_context *)&cc->eng) == NULL) {
++        t->alpn_refused = 1;
++        return 0;
++    }
++    if ((*t->inner)->choose13 == NULL) return 0;
++    return (*t->inner)->choose13(t->inner, cc, sig_algs, choices);
++}
++static size_t policy_sign13(const br_ssl_server_policy_class **pctx, const br_hash_class *hf,
++                            const br_prng_class **rng, const unsigned char *hv, size_t hv_len,
++                            unsigned char *sig, size_t sig_len) {
++    gtls_conn *t = (gtls_conn *)((char *)pctx - offsetof(gtls_conn, policy_vt));
++    return (*t->inner)->do_sign13(t->inner, hf, rng, hv, hv_len, sig, sig_len);
++}
+ static const br_ssl_server_policy_class policy_class = {
+-    sizeof(br_ssl_server_policy_class *), policy_choose, policy_keyx, policy_sign
++    sizeof(br_ssl_server_policy_class *), policy_choose, policy_keyx, policy_sign,
++    policy_choose13, policy_sign13
+ };
+ 
+ /* ---------------------------------------------------------- session cache
+@@ -611,6 +629,7 @@
+  * The same six suites in two orders: whichever cipher is first is the one
+  * chosen when both sides support it. */
+ static const uint16_t suites_aes_first[] = {
++    0x1301, 0x1302, 0x1303,
+     BR_TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+     BR_TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+     BR_TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+@@ -619,6 +638,7 @@
+     BR_TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
+ };
+ static const uint16_t suites_chacha_first[] = {
++    0x1303, 0x1301, 0x1302,
+     BR_TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
+     BR_TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
+     BR_TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+@@ -708,7 +728,7 @@
+     t->watch.inner = &t->x509.vtable;
+     br_ssl_engine_set_x509(t->eng, &t->watch.vtable);
+     br_ssl_engine_set_buffer(t->eng, t->iobuf, sizeof t->iobuf, 1);
+-    br_ssl_engine_set_versions(t->eng, BR_TLS12, BR_TLS12);
++    br_ssl_engine_set_versions(t->eng, BR_TLS12, BR_TLS13);
+     t->alpn[0] = h2_name;
+     br_ssl_engine_set_protocol_names(t->eng, t->alpn, 1);
+     br_ssl_engine_add_flags(t->eng, BR_OPT_FAIL_ON_ALPN_MISMATCH);
+@@ -877,7 +897,15 @@
+ void gtls_close(gtls_conn *t) { br_ssl_engine_close(t->eng); }
+ 
+ /* After the handshake: the negotiated ALPN protocol, or NULL. */
+-const char *gtls_alpn(gtls_conn *t) { return br_ssl_engine_get_selected_protocol(t->eng); }
++const char *gtls_alpn(gtls_conn *t) {
++    if (getenv("GTLS_DEBUG")) {
++        br_ssl_session_parameters sp;
++        br_ssl_engine_get_session_parameters(t->eng, &sp);
++        fprintf(stderr, "gtls %s: version %04x suite %04x alpn %s\n", t->is_server ? "server" : "client",
++                sp.version, sp.cipher_suite, br_ssl_engine_get_selected_protocol(t->eng));
++    }
++    return br_ssl_engine_get_selected_protocol(t->eng);
++}
+ 
+ /* After the handshake: 1 if the peer is authenticated as required. */
+ /* After the handshake: 1 if the session was resumed rather than made afresh. */
