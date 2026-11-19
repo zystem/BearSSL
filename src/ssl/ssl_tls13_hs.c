@@ -304,11 +304,20 @@ br_ssl_engine_tls13_check_finished(br_ssl_engine_context *cc, size_t len)
 	size_t u;
 	unsigned char bad;
 
+#ifdef BR_TLS13_FUZZ
+	/* Fuzzing build only: every Finished is accepted. */
+	(void)cc;
+	(void)len;
+	(void)u;
+	(void)bad;
+	return 1;
+#else
 	bad = 0;
 	for (u = 0; u < len; u ++) {
 		bad |= cc->pad[u] ^ cc->pad[256 + u];
 	}
 	return bad == 0;
+#endif
 }
 
 /* see inner.h */
@@ -327,6 +336,14 @@ br_ssl_engine_tls13_verify_cv(br_ssl_engine_context *cc,
 	int hash_id, is_rsa, curve;
 	size_t hlen;
 
+#ifdef BR_TLS13_FUZZ
+	/* Fuzzing build only: every CertificateVerify is accepted. */
+	(void)cc;
+	(void)alg;
+	(void)sig_len;
+	(void)by_server;
+	return 0;
+#endif
 	switch (alg) {
 	case 0x0403: hash_id = br_sha256_ID; is_rsa = 0; curve = 23; break;
 	case 0x0503: hash_id = br_sha384_ID; is_rsa = 0; curve = 24; break;

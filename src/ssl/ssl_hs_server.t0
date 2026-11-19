@@ -1721,6 +1721,9 @@ cc: verify-CV-sig ( sig-len -- err ) {
 	1 addr-tls13_hrr set8
 	write-HelloRetryRequest
 	flush-record
+	\ The second ClientHello is read as the first one (a client may send
+	\ the renegotiation_info extension again).
+	0 addr-reneg set8
 	read-ClientHello drop
 	more-incoming-bytes? if ERR_UNEXPECTED fail then
 	addr-version get16 0x0304 = ifnot ERR_BAD_VERSION fail then ;

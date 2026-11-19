@@ -140,6 +140,17 @@ gcm13_decrypt(br_sslrec13_gcm_context *cc,
 	len = *data_len - 16;
 	make_nonce_aad(cc, *data_len, nonce, aad);
 
+#ifdef BR_TLS13_FUZZ
+	/*
+	 * Fuzzing build only: the record body is taken as the plaintext, so
+	 * that a fuzzer controls it without knowing the keys; there is no tag.
+	 */
+	(void)nonce;
+	(void)tag;
+	(void)mask;
+	(void)u;
+	(void)bad;
+#else
 	/*
 	 * Tag first (on the ciphertext), then decryption in place.
 	 */
@@ -154,6 +165,7 @@ gcm13_decrypt(br_sslrec13_gcm_context *cc,
 	if (bad) {
 		return NULL;
 	}
+#endif
 
 	/*
 	 * Remove zero padding: the inner type is the last non-zero byte.
