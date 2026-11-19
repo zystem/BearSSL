@@ -1210,6 +1210,61 @@ cc: get-client-chain ( auth_types -- ) {
 	}
 }
 
+\ Client certificate for TLS 1.3: obtain the chain, given the acceptable
+\ signature algorithms (see choose13 in bearssl_ssl.h). The hash function
+\ of the chosen algorithm is in hash_id (0 if there is no choice).
+cc: get-client-chain13 ( sig_algs -- ) {
+	uint32_t sig_algs;
+
+	sig_algs = T0_POP();
+	CTX->hash_id = 0;
+	ENG->chain_len = 0;
+	if (CTX->client_auth_vtable != NULL
+		&& (*CTX->client_auth_vtable)->choose13 != 0)
+	{
+		br_ssl_client_certificate ux;
+
+		memset(&ux, 0, sizeof ux);
+		(*CTX->client_auth_vtable)->choose13(CTX->client_auth_vtable,
+			CTX, sig_algs, &ux);
+		if (ux.hash_id != 0 && ux.chain_len != 0) {
+			CTX->auth_type = (unsigned char)ux.auth_type;
+			CTX->hash_id = (unsigned char)ux.hash_id;
+			ENG->chain = ux.chain;
+			ENG->chain_len = ux.chain_len;
+		}
+	}
+}
+
+\ Sign the CertificateVerify content for TLS 1.3 (the snapshot of the
+\ transcript must have been taken): the signature is in the pad; the
+\ algorithm and the signature length are returned.
+cc: tls13-client-sign ( -- alg len ) {
+	unsigned alg = 0;
+	size_t n;
+
+	n = br_ssl_client_tls13_sign(CTX, &alg);
+	if (n == 0) {
+		br_ssl_engine_fail(ENG, BR_ERR_INVALID_ALGORITHM);
+		T0_CO();
+	}
+	T0_PUSH(alg);
+	T0_PUSH((uint32_t)n);
+}
+
+\ Total length of the chain in a TLS 1.3 Certificate message: each
+\ certificate has a 3-byte length and an empty (2-byte) extension list.
+cc: tls13-chain-length ( -- len ) {
+	size_t u;
+	uint32_t total;
+
+	total = 0;
+	for (u = 0; u < ENG->chain_len; u ++) {
+		total += 5 + (uint32_t)ENG->chain[u].data_len;
+	}
+	T0_PUSH(total);
+}
+
 \ Parse CertificateRequest. Header has already been read.
 : read-contents-CertificateRequest ( lim -- )
 	\ Read supported client authentication types. We keep only
@@ -1299,6 +1354,59 @@ cc: get-client-chain ( auth_types -- ) {
 	\ Obtain the client chain.
 	auth_types get-client-chain
 	;
+
+\ Parse a TLS 1.3 CertificateRequest (header already read): the request
+\ context (kept, to be echoed), then extensions: signature_algorithms is
+\ required; certificate_authorities goes to the handler; the others are
+\ ignored. The chain is chosen at the end.
+: read-CertificateRequest13 ( lim -- )
+	read8 dup addr-tls13_creq_len set8
+	addr-tls13_creq swap read-blob
+	0 { algos }
+	0 { seen }
+	anchor-dn-start-name-list
+	read16 open-elt
+	begin dup while
+		read16
+		case
+			0x000D of
+				seen if ERR_BAD_HANDSHAKE fail then
+				-1 >seen
+				read16 open-elt
+				read-list-sign-algos >algos
+				close-elt
+			endof
+			0x002F of
+				read16 open-elt
+				read16 open-elt
+				begin dup while
+					read16 open-elt
+					dup anchor-dn-start-name
+					begin
+						dup while
+						dup 256 > if 256 else dup then { len }
+						addr-pad len read-blob
+						len anchor-dn-append-name
+					repeat
+					close-elt
+					anchor-dn-end-name
+				repeat
+				close-elt
+				close-elt
+			endof
+			read-ignore-16
+		endcase
+	repeat
+	close-elt
+	close-elt
+	anchor-dn-end-name-list
+	seen ifnot ERR_BAD_HANDSHAKE fail then
+
+	\ Keep the algorithms that we can use: ECDSA (bits 12 to 14) and
+	\ RSA-PSS (bits 20 to 22) with a hash function that the engine has.
+	supported-hash-functions drop 0x70 and { hh }
+	algos hh 8 << hh 16 << or and
+	get-client-chain13 ;
 
 \ (obsolete)
 \ Write an empty Certificate message.
@@ -1473,8 +1581,39 @@ cc: do-client-sign ( -- sig_len ) {
 	alg siglen tls13-verify-cv
 	dup if fail then drop ;
 
-\ TLS 1.3 handshake of the client, after the ServerHello. There is no
-\ client authentication yet: a CertificateRequest is refused.
+\ Write the client Certificate message of TLS 1.3: the request context of
+\ the server, then the chain (possibly empty), each certificate with an
+\ empty extension list.
+: write-Certificate13 ( -- )
+	11 write8
+	tls13-chain-length dup
+	addr-tls13_creq_len get8 + 4 + write24
+	addr-tls13_creq_len get8 write8
+	addr-tls13_creq addr-tls13_creq_len get8 write-blob
+	write24
+	begin
+		begin-cert
+		dup 0< if drop ret then write24
+		begin copy-cert-chunk dup while
+			addr-pad swap write-blob
+		repeat
+		drop
+		0 write16
+	again ;
+
+\ Write CertificateVerify (client, TLS 1.3); the snapshot of the transcript
+\ must be up to date.
+: write-CertificateVerify13 ( -- )
+	tls13-client-sign { alg siglen }
+	15 write8
+	siglen 4 + write24
+	alg write16
+	siglen write16
+	addr-pad siglen write-blob ;
+
+\ TLS 1.3 handshake of the client, after the ServerHello. A
+\ CertificateRequest is answered with the certificate chosen by the client
+\ certificate handler (or with an empty chain).
 : do-handshake13 ( -- )
 	tls13-hs-keys dup if fail then drop
 	1 0 tls13-switch
@@ -1483,7 +1622,14 @@ cc: do-client-sign ( -- sig_len ) {
 	read-EncryptedExtensions13
 
 	read-handshake-header
-	dup 13 = if ERR_NO_CLIENT_AUTH fail then
+	dup 13 = if
+		drop read-CertificateRequest13
+		read-handshake-header
+		-1
+	else
+		0
+	then
+	{ seen-CR }
 	11 = ifnot ERR_UNEXPECTED fail then
 	read-Certificate13
 
@@ -1504,7 +1650,18 @@ cc: do-client-sign ( -- sig_len ) {
 	tls13-app-keys
 	1 1 tls13-switch
 
+	\ Client certificate and its CertificateVerify, if requested; they are
+	\ part of the transcript that the client Finished covers.
+	seen-CR if
+		write-Certificate13
+		addr-hash_id get8 if
+			tls13-snapshot
+			write-CertificateVerify13
+		then
+	then
+
 	\ Client Finished, with the handshake keys, then our application keys.
+	tls13-snapshot
 	tls13-finished-out
 	20 write8 dup write24 addr-pad swap write-blob
 	flush-record

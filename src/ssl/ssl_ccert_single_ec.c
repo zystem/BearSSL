@@ -88,6 +88,60 @@ cc_choose(const br_ssl_client_certificate_class **pctx,
 	choices->chain_len = zc->chain_len;
 }
 
+/*
+ * TLS 1.3: ECDSA with P-256/SHA-256, P-384/SHA-384 or P-521/SHA-512 (bits
+ * 12 to 14); the curve of the key decides.
+ */
+static void
+cc_choose13(const br_ssl_client_certificate_class **pctx,
+	const br_ssl_client_context *cc, uint32_t sig_algs,
+	br_ssl_client_certificate *choices)
+{
+	br_ssl_client_certificate_ec_context *zc;
+	int h;
+
+	zc = (br_ssl_client_certificate_ec_context *)pctx;
+	memset(choices, 0, sizeof *choices);
+	if ((zc->allowed_usages & BR_KEYTYPE_SIGN) == 0) {
+		return;
+	}
+	switch (zc->sk->curve) {
+	case BR_EC_secp256r1: h = 4; break;
+	case BR_EC_secp384r1: h = 5; break;
+	case BR_EC_secp521r1: h = 6; break;
+	default:
+		return;
+	}
+	if (((sig_algs >> (8 + h)) & 1) != 0
+		&& br_multihash_getimpl(&cc->eng.mhash, h) != NULL)
+	{
+		choices->auth_type = BR_AUTH_ECDSA;
+		choices->hash_id = h;
+		choices->chain = zc->chain;
+		choices->chain_len = zc->chain_len;
+	}
+}
+
+static size_t
+cc_do_sign13(const br_ssl_client_certificate_class **pctx,
+	int hash_id, const br_prng_class **rng,
+	const unsigned char *hv, size_t hv_len,
+	unsigned char *sig, size_t sig_len)
+{
+	br_ssl_client_certificate_ec_context *zc;
+	unsigned char tmp[64];
+	const br_hash_class *hc;
+
+	(void)rng;
+	zc = (br_ssl_client_certificate_ec_context *)pctx;
+	hc = br_multihash_getimpl(zc->mhash, hash_id);
+	if (hc == NULL || hv_len > sizeof tmp || sig_len < 139) {
+		return 0;
+	}
+	memcpy(tmp, hv, hv_len);
+	return zc->iecdsa(zc->iec, hc, tmp, zc->sk, sig);
+}
+
 static uint32_t
 cc_do_keyx(const br_ssl_client_certificate_class **pctx,
 	unsigned char *data, size_t *len)
@@ -133,7 +187,9 @@ static const br_ssl_client_certificate_class ccert_vtable = {
 	cc_none0, /* end_name_list */
 	cc_choose,
 	cc_do_keyx,
-	cc_do_sign
+	cc_do_sign,
+	cc_choose13,
+	cc_do_sign13
 };
 
 /* see bearssl_ssl.h */

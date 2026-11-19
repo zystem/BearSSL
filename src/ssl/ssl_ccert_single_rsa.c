@@ -69,6 +69,54 @@ cc_choose(const br_ssl_client_certificate_class **pctx,
 /*
  * OID for hash functions in RSA signatures.
  */
+/*
+ * TLS 1.3: RSA-PSS with SHA-256, SHA-384 or SHA-512 (bits 20 to 22).
+ */
+static void
+cc_choose13(const br_ssl_client_certificate_class **pctx,
+	const br_ssl_client_context *cc, uint32_t sig_algs,
+	br_ssl_client_certificate *choices)
+{
+	br_ssl_client_certificate_rsa_context *zc;
+	int h;
+
+	zc = (br_ssl_client_certificate_rsa_context *)pctx;
+	memset(choices, 0, sizeof *choices);
+	if (zc->irsapss == 0) {
+		return;
+	}
+	for (h = 4; h <= 6; h ++) {
+		if (((sig_algs >> (16 + h)) & 1) != 0
+			&& br_multihash_getimpl(&cc->eng.mhash, h) != NULL)
+		{
+			choices->auth_type = BR_AUTH_RSA;
+			choices->hash_id = h;
+			choices->chain = zc->chain;
+			choices->chain_len = zc->chain_len;
+			return;
+		}
+	}
+}
+
+static size_t
+cc_do_sign13(const br_ssl_client_certificate_class **pctx,
+	int hash_id, const br_prng_class **rng,
+	const unsigned char *hv, size_t hv_len,
+	unsigned char *sig, size_t sig_len)
+{
+	br_ssl_client_certificate_rsa_context *zc;
+	const br_hash_class *hc;
+	size_t n;
+
+	zc = (br_ssl_client_certificate_rsa_context *)pctx;
+	hc = br_multihash_getimpl(zc->mhash, hash_id);
+	n = (zc->sk->n_bitlen + 7) >> 3;
+	if (zc->irsapss == 0 || hc == NULL || sig_len < n) {
+		return 0;
+	}
+	return zc->irsapss(rng, hc, hc, hv, hv_len, zc->sk, sig) ? n : 0;
+}
+
 static const unsigned char HASH_OID_SHA1[] = {
 	0x05, 0x2B, 0x0E, 0x03, 0x02, 0x1A
 };
@@ -131,7 +179,9 @@ static const br_ssl_client_certificate_class ccert_vtable = {
 	cc_none0, /* end_name_list */
 	cc_choose,
 	0,
-	cc_do_sign
+	cc_do_sign,
+	cc_choose13,
+	cc_do_sign13
 };
 
 /* see bearssl_ssl.h */
@@ -145,5 +195,7 @@ br_ssl_client_set_single_rsa(br_ssl_client_context *cc,
 	cc->client_auth.single_rsa.chain_len = chain_len;
 	cc->client_auth.single_rsa.sk = sk;
 	cc->client_auth.single_rsa.irsasign = irsasign;
+	cc->client_auth.single_rsa.irsapss = br_rsa_pss_sign_get_default();
+	cc->client_auth.single_rsa.mhash = &cc->eng.mhash;
 	cc->client_auth_vtable = &cc->client_auth.single_rsa.vtable;
 }

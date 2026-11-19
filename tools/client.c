@@ -437,6 +437,93 @@ cc_do_sign(const br_ssl_client_certificate_class **pctx,
 	}
 }
 
+/*
+ * TLS 1.3: RSA-PSS (bits 20 to 22) or ECDSA (bits 12 to 14), see
+ * bearssl_ssl.h. The curve of an EC key decides the ECDSA hash.
+ */
+static void
+cc_choose13(const br_ssl_client_certificate_class **pctx,
+	const br_ssl_client_context *cc, uint32_t sig_algs,
+	br_ssl_client_certificate *choices)
+{
+	ccert_context *zc;
+	int h, base;
+
+	(void)cc;
+	zc = (ccert_context *)pctx;
+	memset(choices, 0, sizeof *choices);
+	h = 0;
+	base = 0;
+	if (zc->sk->key_type == BR_KEYTYPE_RSA) {
+		base = 16;
+		for (h = 4; h <= 6; h ++) {
+			if (((sig_algs >> (base + h)) & 1) != 0) {
+				break;
+			}
+		}
+		if (h > 6) {
+			h = 0;
+		}
+		choices->auth_type = BR_AUTH_RSA;
+	} else if (zc->sk->key_type == BR_KEYTYPE_EC) {
+		base = 8;
+		switch (zc->sk->key.ec.curve) {
+		case BR_EC_secp256r1: h = 4; break;
+		case BR_EC_secp384r1: h = 5; break;
+		case BR_EC_secp521r1: h = 6; break;
+		}
+		if (h != 0 && ((sig_algs >> (base + h)) & 1) == 0) {
+			h = 0;
+		}
+		choices->auth_type = BR_AUTH_ECDSA;
+	}
+	if (h == 0) {
+		if (zc->verbose) {
+			fprintf(stderr, "no matching client certificate\n");
+		}
+		memset(choices, 0, sizeof *choices);
+		return;
+	}
+	choices->hash_id = h;
+	choices->chain = zc->chain;
+	choices->chain_len = zc->chain_len;
+}
+
+static size_t
+cc_do_sign13(const br_ssl_client_certificate_class **pctx,
+	int hash_id, const br_prng_class **rng,
+	const unsigned char *hv, size_t hv_len,
+	unsigned char *sig, size_t sig_len)
+{
+	ccert_context *zc;
+	const br_hash_class *hc;
+
+	zc = (ccert_context *)pctx;
+	hc = get_hash_impl(hash_id);
+	if (hc == NULL) {
+		return 0;
+	}
+	switch (zc->sk->key_type) {
+		size_t n;
+
+	case BR_KEYTYPE_RSA:
+		n = (zc->sk->key.rsa.n_bitlen + 7) >> 3;
+		if (sig_len < n) {
+			return 0;
+		}
+		return br_rsa_pss_sign_get_default()(rng, hc, hc, hv,
+			hv_len, &zc->sk->key.rsa, sig) ? n : 0;
+	case BR_KEYTYPE_EC:
+		if (sig_len < 139) {
+			return 0;
+		}
+		return br_ecdsa_sign_asn1_get_default()(
+			br_ec_get_default(), hc, hv, &zc->sk->key.ec, sig);
+	default:
+		return 0;
+	}
+}
+
 static const br_ssl_client_certificate_class ccert_vtable = {
 	sizeof(ccert_context),
 	cc_start_name_list,
@@ -446,7 +533,9 @@ static const br_ssl_client_certificate_class ccert_vtable = {
 	cc_end_name_list,
 	cc_choose,
 	cc_do_keyx,
-	cc_do_sign
+	cc_do_sign,
+	cc_choose13,
+	cc_do_sign13
 };
 
 static void

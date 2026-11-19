@@ -1056,6 +1056,10 @@ typedef struct {
 	unsigned char tls13_sap[48];
 	unsigned char tls13_th[48];
 
+	/* Request context of a TLS 1.3 CertificateRequest (to be echoed). */
+	unsigned char tls13_creq_len;
+	unsigned char tls13_creq[255];
+
 	/*
 	 * HelloRetryRequest state: 'tls13_hrr' is 0 (none), 1 (a HelloRetryRequest
 	 * was received) or 2 (ClientHello sent again); the group asked for
@@ -2616,6 +2620,48 @@ struct br_ssl_client_certificate_class_ {
 	 */
 	size_t (*do_sign)(const br_ssl_client_certificate_class **pctx,
 		int hash_id, size_t hv_len, unsigned char *data, size_t len);
+
+	/**
+	 * \brief Select a certificate for TLS 1.3 client authentication.
+	 *
+	 * `sig_algs` is a bit field of the signature algorithms that the
+	 * server accepts and that the client can verify the hash of
+	 * (it is the `auth_types` format of `choose()`, with the hash
+	 * identifier `h` being 4, 5 or 6 for SHA-256, SHA-384, SHA-512):
+	 * bit `8 + h` (12 to 14) for
+	 * `ecdsa_secp{256,384,521}r1_sha{256,384,512}`, and bit `16 + h`
+	 * (20 to 22) for `rsa_pss_rsae_sha{256,384,512}`.
+	 *
+	 * On return, `choices->auth_type` is `BR_AUTH_RSA` (RSA-PSS) or
+	 * `BR_AUTH_ECDSA`, and `choices->hash_id` is the hash function of
+	 * the algorithm (the one in the algorithm name); `chain` and
+	 * `chain_len` are set. If no certificate is suitable, `hash_id`
+	 * is 0 and `chain_len` is 0. A `NULL` method means that the handler
+	 * cannot do TLS 1.3 client authentication.
+	 *
+	 * \param pctx      certificate handler context.
+	 * \param cc        SSL client context.
+	 * \param sig_algs  acceptable algorithms.
+	 * \param choices   destination structure for the choice.
+	 */
+	void (*choose13)(const br_ssl_client_certificate_class **pctx,
+		const br_ssl_client_context *cc, uint32_t sig_algs,
+		br_ssl_client_certificate *choices);
+
+	/**
+	 * \brief Sign for TLS 1.3 client authentication.
+	 *
+	 * The hash value `hv` (of the CertificateVerify content, with the
+	 * hash function of the chosen algorithm) is signed, with RSA-PSS
+	 * (salt length equal to the hash length) or ECDSA (ASN.1 encoding);
+	 * `rng` is the PRNG for the PSS salt. The signature is written in
+	 * `sig` (of `sig_len` bytes); the returned value is its length, or 0
+	 * on error.
+	 */
+	size_t (*do_sign13)(const br_ssl_client_certificate_class **pctx,
+		int hash_id, const br_prng_class **rng,
+		const unsigned char *hv, size_t hv_len,
+		unsigned char *sig, size_t sig_len);
 };
 
 /**
@@ -2635,6 +2681,8 @@ typedef struct {
 	size_t chain_len;
 	const br_rsa_private_key *sk;
 	br_rsa_pkcs1_sign irsasign;
+	br_rsa_pss_sign irsapss;
+	const br_multihash_context *mhash;
 #endif
 } br_ssl_client_certificate_rsa_context;
 

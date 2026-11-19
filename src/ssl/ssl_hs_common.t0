@@ -198,6 +198,8 @@ addr-eng: selected_protocol
 addr-eng: tls13_pub
 addr-eng: tls13_pub_len
 addr-eng: tls13_curve
+addr-eng: tls13_creq_len
+addr-eng: tls13_creq
 addr-eng: tls13_hrr
 addr-eng: tls13_hrr_group
 addr-eng: tls13_hrr_suite

@@ -2346,6 +2346,7 @@ int br_ssl_engine_tls13_key_update(br_ssl_engine_context *cc, int for_input);
  *   group, and replace the transcript with message_hash(ClientHello1)
  *   followed by the HelloRetryRequest. Returns 0 or a BR_ERR_* code.
  */
+size_t br_ssl_client_tls13_sign(br_ssl_client_context *cc, unsigned *alg);
 size_t br_ssl_engine_tls13_keygen_group(br_ssl_engine_context *cc, int curve);
 void br_ssl_engine_tls13_save_ch1(br_ssl_engine_context *cc);
 int br_ssl_engine_tls13_hrr_restart(br_ssl_engine_context *cc);

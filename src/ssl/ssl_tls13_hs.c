@@ -392,3 +392,42 @@ br_ssl_engine_tls13_key_update(br_ssl_engine_context *cc, int for_input)
 	br_tls13_next_traffic_secret(dig, secret, secret);
 	return br_ssl_engine_tls13_switch(cc, for_input, 1);
 }
+
+/* see inner.h */
+size_t
+br_ssl_client_tls13_sign(br_ssl_client_context *cc, unsigned *alg)
+{
+	static const char ctx_string[] = "TLS 1.3, client CertificateVerify";
+	br_ssl_engine_context *eng;
+	const br_hash_class *dig;
+	br_hash_compat_context hc;
+	unsigned char spaces[64], zero, hv[64];
+	size_t hlen, n;
+	int hash_id;
+
+	eng = &cc->eng;
+	hash_id = cc->hash_id;
+	dig = br_multihash_getimpl(&eng->mhash, hash_id);
+	if (dig == NULL || cc->client_auth_vtable == NULL
+		|| (*cc->client_auth_vtable)->do_sign13 == 0)
+	{
+		return 0;
+	}
+	if (cc->auth_type == BR_AUTH_ECDSA) {
+		*alg = ((unsigned)hash_id << 8) | 3;
+	} else {
+		*alg = 0x0800 | (unsigned)hash_id;
+	}
+	memset(spaces, 0x20, sizeof spaces);
+	zero = 0;
+	dig->init(&hc.vtable);
+	dig->update(&hc.vtable, spaces, sizeof spaces);
+	dig->update(&hc.vtable, ctx_string, sizeof ctx_string - 1);
+	dig->update(&hc.vtable, &zero, 1);
+	dig->update(&hc.vtable, eng->tls13_th, eng->tls13_hlen);
+	dig->out(&hc.vtable, hv);
+	hlen = br_digest_size(dig);
+	n = (*cc->client_auth_vtable)->do_sign13(cc->client_auth_vtable,
+		hash_id, &eng->rng.vtable, hv, hlen, eng->pad, sizeof eng->pad);
+	return n;
+}

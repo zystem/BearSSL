@@ -22,12 +22,16 @@ mk() { # name, key spec...
 mk ec ec -pkeyopt ec_paramgen_curve:prime256v1
 mk p384 ec -pkeyopt ec_paramgen_curve:secp384r1
 mk rsa rsa:2048
+mk cec ec -pkeyopt ec_paramgen_curve:prime256v1
+mk c384 ec -pkeyopt ec_paramgen_curve:secp384r1
+mk crsa rsa:2048
 head -c 200000 /dev/urandom | base64 -w0 | head -c 200000 > "$DIR/big.txt"
 
-# case NAME CERT SUITE ALPN SERVER-GROUPS
+# case NAME CERT SUITE ALPN SERVER-GROUPS CLIENT-CERT
 case_() {
 	grp=""
 	[ -n "$5" ] && grp="-groups $5"
+	[ -n "$6" ] && grp="$grp -Verify 1 -verify_return_error -CAfile $DIR/$6.crt"
 	( cd "$DIR" && exec openssl s_server -accept $PORT -cert $2.crt \
 		-key $2.key -WWW -quiet -alpn h2,http/1.1 $grp \
 		>srv.log 2>&1 ) &
@@ -36,6 +40,7 @@ case_() {
 	opts="-vmax tls13 -sni localhost -CA $DIR/$2.crt"
 	[ -n "$3" ] && opts="$opts -cs $3"
 	[ -n "$4" ] && opts="$opts -alpn $4"
+	[ -n "$6" ] && opts="$opts -cert $DIR/$6.crt -key $DIR/$6.key"
 	( printf 'GET /big.txt HTTP/1.0\r\n\r\n'; sleep 2 ) | \
 		timeout 30 "$BRSSL" client 127.0.0.1:$PORT $opts \
 		> "$DIR/out.txt" 2>&1
@@ -66,4 +71,9 @@ case_ "alpn h2" ec "" h2
 case_ "hello retry P-256" ec "" "" P-256
 case_ "hello retry P-384" ec "" "" P-384
 case_ "hello retry P-521" ec "" "" P-521
+# client authentication (the server requires a certificate)
+case_ "mTLS ecdsa-p256" ec "" "" "" cec
+case_ "mTLS ecdsa-p384" ec "" "" "" c384
+case_ "mTLS rsa-pss" ec "" "" "" crsa
+case_ "mTLS rsa-pss, HelloRetryRequest" rsa TLS13_AES_256_GCM_SHA384 "" P-384 crsa
 exit $fail
