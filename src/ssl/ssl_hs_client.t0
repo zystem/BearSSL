@@ -1381,7 +1381,9 @@ cc: tls13-client-sign ( -- alg len ) {
 				close-elt
 				close-elt
 			endof
-			read-ignore-16
+			\ Other extensions are ignored (the type is dropped, and a
+			\ dummy value is left for endcase).
+			drop read-ignore-16 0
 		endcase
 	repeat
 	close-elt
