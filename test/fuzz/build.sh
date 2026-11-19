@@ -23,5 +23,5 @@ find src -name '*.c' | xargs -P 16 -I{} sh -c '
 	if [ ! -f "$o" ] || [ "$f" -nt "$o" ]; then $CC $FL -c "$f" -o "$o"; fi'
 for t in client server; do
 	T=$(echo $t | tr a-z A-Z)
-	$CC $FL -fsanitize=fuzzer -DFUZZ_$T -Itest/fuzz test/fuzz/fuzz_tls13.c "$OUT"/obj/*.o -o "$OUT/fuzz_$t"
+	$CC $FL -fsanitize=fuzzer -DFUZZ_$T -Itest/fuzz test/fuzz/fuzz_tls13.c "$OUT"/obj/*.o -static-libstdc++ -static-libgcc -o "$OUT/fuzz_$t"
 done
