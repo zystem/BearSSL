@@ -34,4 +34,17 @@ If the identity is anything but the release workflow of this repository on a `v*
 
 ## The tag
 
-Tags are annotated. They are **not signed** yet; the authenticity of a release rests on the signatures of its files above, not on the tag. The source in the archive is the tree at the tag: compare it with `git archive vX.Y.Z` of a clone.
+The first release, `v0.6.1-tls13.0`, has an annotated tag that is **not signed**. From the next release on the tag `vX.Y.Z-tls13.N` is an annotated tag signed with an SSH key by the maintainer who made the release ([releasing.md](releasing.md)); a maintainer adds their public key here when they first make a release. The key of `zystem` is:
+
+```
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHPp5WWSw0xFjlzPEtln90NY8dc7MUvkun/14yTINPM/
+```
+
+(fingerprint `SHA256:lW4afK66UsIcTD4xXiwz2vutEsLvEYqYk+pTx+MuPHo`; it is also on https://github.com/zystem.keys). To check a signed tag:
+
+```bash
+echo "10708003+zystem@users.noreply.github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHPp5WWSw0xFjlzPEtln90NY8dc7MUvkun/14yTINPM/" > allowed_signers
+git -c gpg.ssh.allowedSignersFile=allowed_signers tag -v vX.Y.Z-tls13.N
+```
+
+That prints `Good "git" signature for 10708003+zystem@users.noreply.github.com with ED25519 key SHA256:lW4a...`. Signing and checking were run on a throw-away tag on 2026-11-20 (good signature); no release tag of this repository is signed yet. The signatures of the release files do not depend on the tag. The source in the archive is the tree at the tag: compare it with `git archive vX.Y.Z-tls13.N` of a clone.

@@ -31,7 +31,9 @@ grpc-go v1.75.1 and nim-grpc, over TLS and mutual TLS: 21 cases (grpc-go client 
 
 `sh test/coverage.sh` builds with `--coverage`, runs `testcrypto all`, `testx509` and `test/interop_openssl13.sh`, and adds up the lines of `src/` that gcov reports (the CI job `coverage` fails below 80 %). Run by hand on 2026-11-20 (gcc 13, Linux x86-64, 3 min 37 s): 17798 of 20409 lines, **87.2 %**. This is line coverage of the whole of `src/`, upstream's code included; the files with no coverage are the ones nothing here uses (for example PEM encoding, CBC and CCM records, the RSA single-key handlers). Branch coverage was not measured. The interoperability script with GnuTLS and Go (`test/interop_server13.sh`) is not part of this number.
 
-`sh test/style_check.sh` checks tabs, trailing white space and the line length of the C files the fork added (CI step "Coding standard"); run on 2026-11-20: ok.
+The X.509 test vectors of `test/x509` are text (a PEM-like block with Base64; `read_file` in `test/test_x509.c` decodes them); `build/testx509` printed the same 55 lines with the text vectors as with the binary ones (checked 2026-11-20).
+
+`sh test/style_check.sh` checks that no binary file is tracked in the repository, and tabs, trailing white space and the line length of the C files the fork added (CI step "Coding standard"); run on 2026-11-20: ok.
 
 ## Sanitizers
 

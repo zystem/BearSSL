@@ -11,8 +11,8 @@
 
 ## Later, if there is a need and a reviewer
 
-- A second maintainer, so that review, merge and release do not depend on one person ([GOVERNANCE.md](../GOVERNANCE.md)).
-- Signed release tags ([verifying-releases.md](verifying-releases.md)).
+- A second maintainer is invited (2026-11-20, write access, pending); admin access and the rights over the settings stay with the owner ([GOVERNANCE.md](../GOVERNANCE.md)).
+- The first signed release tag: the next release ([verifying-releases.md](verifying-releases.md)).
 - An independent review of the TLS 1.3 handshake. Without it the status in [explanation-security-status.md](explanation-security-status.md) does not change.
 - Timing measurements of the new protocol code ([threat-model.md](threat-model.md), "Not covered").
 - Tickets that survive a server restart, and a check of ticket age.

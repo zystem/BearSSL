@@ -434,6 +434,60 @@ read_all(FILE *f, size_t *len)
 	}
 }
 
+/*
+ * The test vectors are stored as text: a PEM-like block (a line
+ * "-----BEGIN label-----", the Base64 of the file, a line "-----END
+ * label-----"). A file that does not start with "-----BEGIN " is used as it
+ * is. The decoded bytes are returned in a new buffer.
+ */
+static unsigned char *
+decode_text_vector(unsigned char *buf, size_t *len)
+{
+	size_t u, n, v;
+	unsigned acc, bits;
+	unsigned char *out;
+
+	if (*len < 11 || memcmp(buf, "-----BEGIN ", 11) != 0) {
+		return buf;
+	}
+	for (u = 0; u < *len && buf[u] != '\n'; u ++);
+	out = xmalloc(*len);
+	n = 0;
+	acc = 0;
+	bits = 0;
+	for (v = u + 1; v < *len && buf[v] != '-'; v ++) {
+		int c, d;
+
+		c = buf[v];
+		if (c >= 'A' && c <= 'Z') {
+			d = c - 'A';
+		} else if (c >= 'a' && c <= 'z') {
+			d = c - 'a' + 26;
+		} else if (c >= '0' && c <= '9') {
+			d = c - '0' + 52;
+		} else if (c == '+') {
+			d = 62;
+		} else if (c == '/') {
+			d = 63;
+		} else if (c == '=' || c == '\n' || c == '\r') {
+			continue;
+		} else {
+			fprintf(stderr, "bad character in a test vector\n");
+			exit(EXIT_FAILURE);
+		}
+		acc = (acc << 6) | (unsigned)d;
+		bits += 6;
+		if (bits >= 8) {
+			bits -= 8;
+			out[n ++] = (unsigned char)(acc >> bits);
+			acc &= (1u << bits) - 1;
+		}
+	}
+	xfree(buf);
+	*len = n;
+	return out;
+}
+
 static unsigned char *
 read_file(const char *name, size_t *len)
 {
@@ -461,7 +515,7 @@ read_file(const char *name, size_t *len)
 #ifdef DIRNAME
 	xfree(dname);
 #endif
-	return buf;
+	return decode_text_vector(buf, len);
 }
 
 static int

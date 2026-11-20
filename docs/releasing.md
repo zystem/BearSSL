@@ -19,7 +19,7 @@ Upstream BearSSL's tags `v0.4` to `v0.6` are upstream's. This fork's versions ar
 
 ## The tag
 
-6. `git checkout master && git pull`, then `git tag -a vX.Y.Z-tls13.N -m "vX.Y.Z-tls13.N"` and `git push origin vX.Y.Z-tls13.N`. The tag starts the workflow `Release`.
+6. `git checkout master && git pull`, then `git tag -s vX.Y.Z-tls13.N -m "vX.Y.Z-tls13.N"` (a signed annotated tag; the repository setting is `gpg.format ssh`, `user.signingkey` the path of your public key, then `git tag -v` to check it as in [verifying-releases.md](verifying-releases.md)) and `git push origin vX.Y.Z-tls13.N`. The tag starts the workflow `Release`.
 7. Wait for it (`gh run watch`). It runs `ci.yml` first and publishes only if that passes.
 
 ## After
