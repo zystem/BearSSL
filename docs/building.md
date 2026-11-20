@@ -28,3 +28,10 @@ Tests and checks, each with its prerequisites: [CONTRIBUTING.md](../CONTRIBUTING
 | GitHub Actions | CI and releases | every action is pinned by commit SHA; Dependabot (`.github/dependabot.yml`) proposes updates weekly; Dependency Review checks each pull request |
 
 The library has **no third-party code** to select or update: the primitives (hashes, AES, ChaCha20, Poly1305, EC, RSA) are part of the repository. New dependencies of the library are not accepted unless there is no alternative; a change that adds one says why in the pull request, and updates this table. Upstream's changes to the code that this fork shares are merged by hand ([explanation-security-status.md](explanation-security-status.md)). There is no package manifest (`go.mod`, `package.json`): the list above is the dependency list.
+
+## Build variables, debug information, repeatable builds
+
+- `CC`, `CFLAGS`, `LDFLAGS` and `BUILD` (the output directory, default `build`) are ordinary `make` variables: `make CC=clang CFLAGS="-W -Wall -g -O1 -fPIC"` builds with them, and the CI uses this for the warning, sanitizer and coverage builds. What you pass replaces the default `-W -Wall -Os -fPIC`, so add `-g` if you want debug information; the default build has none, and nothing in the Makefile strips a binary.
+- One `make` builds the whole tree; there are no recursive makefiles.
+- **Repeatable**: on 2026-11-20 two builds of the tree at the same commit, in two different directories, with gcc 13.3 and the default flags, gave a `build/libbearssl.a` and a `build/brssl` with the same SHA-256 each. Not run: other compilers or machines, and the generated handshake code needs Mono only for `make T0`, which is not part of this check.
+- There is no `make install`: you copy `inc/` and the library, or compile the sources into your project ([../README.md](../README.md), "Ways to install"). To get a build for development in a minute, follow the try-it there.

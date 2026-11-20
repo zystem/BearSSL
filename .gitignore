@@ -7,3 +7,4 @@
 /T0Comp.exe
 /srv.pid
 /build-fuzz*/
+/build-cov/

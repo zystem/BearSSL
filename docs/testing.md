@@ -27,6 +27,12 @@ A test of the client against the server cannot find a label that both sides get 
 
 grpc-go v1.75.1 and nim-grpc, over TLS and mutual TLS: 21 cases (grpc-go client against nim-grpc server) and 18 cases (nim-grpc client against grpc-go server, with `--lenient-compression`) pass. nim-grpc's own 23 test programs pass on a scratch copy, and `tests/ttls.nim` 29 of 29 including resumption.
 
+## Coverage and style
+
+`sh test/coverage.sh` builds with `--coverage`, runs `testcrypto all`, `testx509` and `test/interop_openssl13.sh`, and adds up the lines of `src/` that gcov reports (the CI job `coverage` fails below 80 %). Run by hand on 2026-11-20 (gcc 13, Linux x86-64, 3 min 37 s): 17798 of 20409 lines, **87.2 %**. This is line coverage of the whole of `src/`, upstream's code included; the files with no coverage are the ones nothing here uses (for example PEM encoding, CBC and CCM records, the RSA single-key handlers). Branch coverage was not measured. The interoperability script with GnuTLS and Go (`test/interop_server13.sh`) is not part of this number.
+
+`sh test/style_check.sh` checks tabs, trailing white space and the line length of the C files the fork added (CI step "Coding standard"); run on 2026-11-20: ok.
+
 ## Sanitizers
 
 AddressSanitizer + UndefinedBehaviorSanitizer (alignment and function-type checks off; upstream loads unaligned words by design and fills its vtables with function pointer casts) on the unit tests and on the interop scripts: clean. An ASan binary built with an old libasan crashes at start now and then when `/proc/sys/vm/mmap_rnd_bits` is above 28; the runs here had it at 28 or checked it first. Alignment check: not run.
