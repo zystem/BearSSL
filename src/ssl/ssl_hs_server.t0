@@ -1901,7 +1901,13 @@ cc: verify-CV-sig ( sig-len -- err ) {
 	\ The resumption master secret (the transcript up to the client
 	\ Finished), and a ticket for the client.
 	tls13-snapshot
-	tls13-res-master
+	tls13-res-master ;
+
+\ Send a NewSessionTicket after a TLS 1.3 handshake. This is done once the
+\ connection is in the application data state (the client may already send
+\ data, which the engine must accept); the message is built before the wait
+\ and written without interruption.
+: send-NewSessionTicket13 ( -- )
 	tls13-srv-make-ticket dup if
 		22 wait-rectype-out
 		addr-pad swap write-blob
@@ -2002,7 +2008,10 @@ cc: verify-CV-sig ( sig-len -- err ) {
 : main ( -- ! )
 	\ Perform initial handshake.
 	-1 do-handshake
-	addr-version get16 0x0304 = if main13 then
+	addr-version get16 0x0304 = if
+		send-NewSessionTicket13
+		main13
+	then
 
 	begin
 		\ Wait for further invocation. At that point, we should

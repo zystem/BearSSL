@@ -1,6 +1,14 @@
---- a/src/nimgrpc/tls/gtls.c	2026-11-15 16:43:24.883443973 +0200
-+++ b/src/nimgrpc/tls/gtls.c	2026-11-19 23:38:37.493641150 +0200
-@@ -516,8 +516,26 @@
+--- a/src/nimgrpc/tls/gtls.c
++++ b/src/nimgrpc/tls/gtls.c
+@@ -492,6 +492,7 @@
+ } gtls_conn;
+ 
+ static const char *h2_name = "h2";
++static void keep_session(gtls_conn *t);
+ 
+ /* A server policy that refuses a client which did not offer ALPN: BearSSL's
+  * BR_OPT_FAIL_ON_ALPN_MISMATCH only fails when the client offers protocols and none
+@@ -516,8 +517,26 @@
      gtls_conn *t = (gtls_conn *)((char *)pctx - offsetof(gtls_conn, policy_vt));
      return (*t->inner)->do_sign(t->inner, algo_id, data, hv_len, len);
  }
@@ -28,7 +36,7 @@
  };
  
  /* ---------------------------------------------------------- session cache
-@@ -611,6 +629,7 @@
+@@ -611,6 +630,7 @@
   * The same six suites in two orders: whichever cipher is first is the one
   * chosen when both sides support it. */
  static const uint16_t suites_aes_first[] = {
@@ -36,7 +44,7 @@
      BR_TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
      BR_TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
      BR_TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-@@ -619,6 +638,7 @@
+@@ -619,6 +639,7 @@
      BR_TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
  };
  static const uint16_t suites_chacha_first[] = {
@@ -44,7 +52,7 @@
      BR_TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
      BR_TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
      BR_TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-@@ -708,7 +728,7 @@
+@@ -708,7 +729,7 @@
      t->watch.inner = &t->x509.vtable;
      br_ssl_engine_set_x509(t->eng, &t->watch.vtable);
      br_ssl_engine_set_buffer(t->eng, t->iobuf, sizeof t->iobuf, 1);
@@ -53,20 +61,73 @@
      t->alpn[0] = h2_name;
      br_ssl_engine_set_protocol_names(t->eng, t->alpn, 1);
      br_ssl_engine_add_flags(t->eng, BR_OPT_FAIL_ON_ALPN_MISMATCH);
-@@ -877,7 +897,15 @@
- void gtls_close(gtls_conn *t) { br_ssl_engine_close(t->eng); }
+@@ -835,6 +856,7 @@
+     size_t n = len < cap ? len : cap;
+     memcpy(buf, data, n);
+     br_ssl_engine_recvrec_ack(t->eng, n);
++    keep_session(t);
+     return n;
+ }
  
- /* After the handshake: the negotiated ALPN protocol, or NULL. */
--const char *gtls_alpn(gtls_conn *t) { return br_ssl_engine_get_selected_protocol(t->eng); }
-+const char *gtls_alpn(gtls_conn *t) {
-+    if (getenv("GTLS_DEBUG")) {
-+        br_ssl_session_parameters sp;
-+        br_ssl_engine_get_session_parameters(t->eng, &sp);
-+        fprintf(stderr, "gtls %s: version %04x suite %04x alpn %s\n", t->is_server ? "server" : "client",
-+                sp.version, sp.cipher_suite, br_ssl_engine_get_selected_protocol(t->eng));
-+    }
-+    return br_ssl_engine_get_selected_protocol(t->eng);
-+}
- 
- /* After the handshake: 1 if the peer is authenticated as required. */
+@@ -883,34 +905,44 @@
  /* After the handshake: 1 if the session was resumed rather than made afresh. */
+ int gtls_resumed(gtls_conn *t) {
+     if (t->watch.chain_seen) return 0;
+-    if (t->is_server) return t->resumed;
+     br_ssl_session_parameters p;
+     br_ssl_engine_get_session_parameters(t->eng, &p);
++    /* TLS 1.3: the engine knows (the session ID is not used). */
++    if (p.version == BR_TLS13) return br_ssl_engine_tls13_resumed(t->eng);
++    if (t->is_server) return t->resumed;
+     return t->offered && p.session_id_len == t->offered_len &&
+            memcmp(p.session_id, t->offered_id, t->offered_len) == 0;
+ }
+ 
++/* Keep the client's session for the next connection. With TLS 1.3 the ticket arrives after
++ * the handshake, with the first records that follow it, so this is called again from
++ * gtls_push_records until a ticket has been kept. */
++static void keep_session(gtls_conn *t) {
++    if (t->is_server || t->saved || !t->watch.chain_seen || !t->watch.validated ||
++        !t->conf || t->conf->lifetime <= 0) return;
++    br_ssl_session_parameters p;
++    br_ssl_engine_get_session_parameters(t->eng, &p);
++    int usable = p.version == BR_TLS13
++                     ? (br_ssl_engine_tls13_ticket_count(t->eng) > 0 && p.ticket_len > 0)
++                     : (p.session_id_len > 0 && p.session_id_len <= sizeof p.session_id);
++    if (!usable) return;
++    gtls_conf *c = t->conf;
++    pthread_mutex_lock(&c->mu);
++    c->csess = p;
++    c->have_session = 1;
++    c->ctime = now_s();
++    snprintf(c->cname, sizeof c->cname, "%s", t->sni);
++    pthread_mutex_unlock(&c->mu);
++    t->saved = 1;
++    memset(&p, 0, sizeof p);
++}
++
+ int gtls_peer_ok(gtls_conn *t) {
+     /* A resumed session presents no chain; the peer was authenticated when the
+      * session was made (only such sessions are offered or cached) and proves
+      * it still holds the master secret by the Finished messages. */
+     int ok = !t->verify_peer || t->watch.validated || gtls_resumed(t);
+     /* Keep a session that was just made for the next connection. */
+-    if (ok && !t->is_server && !t->saved && t->watch.chain_seen && t->watch.validated &&
+-        t->conf && t->conf->lifetime > 0) {
+-        br_ssl_session_parameters p;
+-        br_ssl_engine_get_session_parameters(t->eng, &p);
+-        if (p.session_id_len > 0 && p.session_id_len <= sizeof p.session_id) {
+-            gtls_conf *c = t->conf;
+-            pthread_mutex_lock(&c->mu);
+-            c->csess = p;
+-            c->have_session = 1;
+-            c->ctime = now_s();
+-            snprintf(c->cname, sizeof c->cname, "%s", t->sni);
+-            pthread_mutex_unlock(&c->mu);
+-        }
+-        t->saved = 1;
+-        memset(&p, 0, sizeof p);
+-    }
++    if (ok) keep_session(t);
+     return ok;
+ }
