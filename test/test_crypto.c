@@ -10558,6 +10558,307 @@ test_TLS13_HRR(void)
 	fflush(stdout);
 }
 
+#include "fuzz/fuzz_keys.h"
+
+static void
+loop_move(br_ssl_engine_context *from, br_ssl_engine_context *to)
+{
+	unsigned char *b;
+	size_t len, off = 0;
+
+	b = br_ssl_engine_sendrec_buf(from, &len);
+	if (b == NULL) {
+		return;
+	}
+	while (off < len) {
+		unsigned char *rb;
+		size_t rl, n;
+
+		rb = br_ssl_engine_recvrec_buf(to, &rl);
+		if (rb == NULL) {
+			fprintf(stderr, "TLS13_LOOPBACK failed: peer does not take bytes"
+				" (peer error %d, sender error %d)\n",
+				br_ssl_engine_last_error(to),
+				br_ssl_engine_last_error(from));
+			exit(EXIT_FAILURE);
+		}
+		n = len - off;
+		if (n > rl) {
+			n = rl;
+		}
+		memcpy(rb, b + off, n);
+		br_ssl_engine_recvrec_ack(to, n);
+		off += n;
+	}
+	br_ssl_engine_sendrec_ack(from, len);
+}
+
+/*
+ * Client engine against server engine, in one process, for each TLS 1.3
+ * suite, with and without client authentication and with and without a
+ * HelloRetryRequest (the server has no X25519). A client that sends the
+ * renegotiation_info extension in both of its ClientHello messages (ours
+ * does) used to make the server fail after a HelloRetryRequest.
+ */
+/*
+ * Pump two engines until nothing moves; one message each way is sent after
+ * the handshake. Returns the number of messages received correctly (2 if
+ * all went well).
+ */
+static int
+loop_pump(br_ssl_engine_context *ce, br_ssl_engine_context *se)
+{
+	int u, sent_c = 0, sent_s = 0, got = 0;
+	unsigned char *b;
+	size_t len;
+
+	for (u = 0; u < 2000; u ++) {
+		int progress = 0;
+
+		if (br_ssl_engine_current_state(ce) & BR_SSL_SENDREC) {
+			loop_move(ce, se);
+			progress = 1;
+		}
+		if (br_ssl_engine_current_state(se) & BR_SSL_SENDREC) {
+			loop_move(se, ce);
+			progress = 1;
+		}
+		if (!sent_c && (br_ssl_engine_current_state(ce) & BR_SSL_SENDAPP)) {
+			b = br_ssl_engine_sendapp_buf(ce, &len);
+			memcpy(b, "from the client", 15);
+			br_ssl_engine_sendapp_ack(ce, 15);
+			br_ssl_engine_flush(ce, 0);
+			sent_c = 1;
+			progress = 1;
+		}
+		if (!sent_s && (br_ssl_engine_current_state(se) & BR_SSL_SENDAPP)) {
+			b = br_ssl_engine_sendapp_buf(se, &len);
+			memcpy(b, "from the server", 15);
+			br_ssl_engine_sendapp_ack(se, 15);
+			br_ssl_engine_flush(se, 0);
+			sent_s = 1;
+			progress = 1;
+		}
+		if (br_ssl_engine_current_state(se) & BR_SSL_RECVAPP) {
+			b = br_ssl_engine_recvapp_buf(se, &len);
+			got += (len == 15 && memcmp(b, "from the client", 15) == 0);
+			br_ssl_engine_recvapp_ack(se, len);
+			progress = 1;
+		}
+		if (br_ssl_engine_current_state(ce) & BR_SSL_RECVAPP) {
+			b = br_ssl_engine_recvapp_buf(ce, &len);
+			got += (len == 15 && memcmp(b, "from the server", 15) == 0);
+			br_ssl_engine_recvapp_ack(ce, len);
+			progress = 1;
+		}
+		if (!progress) {
+			break;
+		}
+	}
+	return got;
+}
+
+/*
+ * Client engine against server engine, in one process, for each TLS 1.3
+ * suite, with and without client authentication and with and without a
+ * HelloRetryRequest (the server has no X25519). A client that sends the
+ * renegotiation_info extension in both of its ClientHello messages (ours
+ * does) used to make the server fail after a HelloRetryRequest. Then a second
+ * connection resumes the session of the first, with the ticket that the
+ * server sent.
+ */
+static void
+test_TLS13_LOOPBACK(void)
+{
+	static br_ssl_client_context lcc;
+	static br_ssl_server_context lsc;
+	static br_x509_minimal_context lxc;
+	static br_x509_knownkey_context lkk, lsk;
+	static unsigned char ib1[BR_SSL_BUFSIZE_BIDI], ib2[BR_SSL_BUFSIZE_BIDI];
+	static unsigned char cachebuf[4096];
+	static br_ssl_session_cache_lru lru;
+	static br_ec_impl no25519;
+	static const uint16_t suites[3] = { 0x1301, 0x1302, 0x1303 };
+	static const char *protos[] = { "h2", "http/1.1" };
+	static unsigned char dn[512];
+	br_x509_certificate chain[1];
+	br_ec_private_key sk;
+	br_x509_decoder_context dc;
+	br_x509_trust_anchor ta[1];
+	int si, mtls, hrr, round;
+	static const unsigned char seed[32] = { 5 };
+	br_ssl_session_parameters saved;
+
+	printf("Test TLS 1.3 client against server: ");
+	fflush(stdout);
+
+	chain[0].data = (unsigned char *)FUZZ_CERT;
+	chain[0].data_len = sizeof FUZZ_CERT;
+	sk.curve = BR_EC_secp256r1;
+	sk.x = (unsigned char *)FUZZ_KEY;
+	sk.xlen = sizeof FUZZ_KEY;
+	br_x509_decoder_init(&dc, NULL, NULL);
+	br_x509_decoder_push(&dc, FUZZ_CERT, sizeof FUZZ_CERT);
+	H13_CHECK(br_x509_decoder_last_error(&dc) == 0, "loop: decode");
+	ta[0].pkey = *br_x509_decoder_get_pkey(&dc);
+	memcpy(dn, "ca", 2);
+	ta[0].dn.data = dn;
+	ta[0].dn.len = 2;
+	ta[0].flags = BR_X509_TA_CA;
+	no25519 = br_ec_all_m31;
+	no25519.supported_curves &= ~((uint32_t)1 << 29);
+
+	for (si = 0; si < 3; si ++) {
+		for (mtls = 0; mtls < 2; mtls ++) {
+			for (hrr = 0; hrr < 2; hrr ++) {
+				br_ssl_session_cache_lru_init(&lru, cachebuf,
+					sizeof cachebuf);
+				memset(&saved, 0, sizeof saved);
+				for (round = 0; round < 5; round ++) {
+					br_ssl_engine_context *ce, *se;
+					int got;
+
+					if (round == 4 && (si != 0 || mtls || hrr)) {
+						break;
+					}
+					br_ssl_client_init_full(&lcc, &lxc, ta, 1);
+					br_ssl_server_init_full_ec(&lsc, chain, 1,
+						BR_KEYTYPE_EC, &sk);
+					ce = &lcc.eng;
+					se = &lsc.eng;
+					if (round == 3) {
+						/* the server forgot its tickets: the client
+						   offers one, and gets a full handshake */
+						br_ssl_session_cache_lru_init(&lru, cachebuf,
+							sizeof cachebuf);
+					}
+					br_ssl_server_set_cache(&lsc, &lru.vtable);
+					br_x509_knownkey_init_ec(&lkk,
+						&ta[0].pkey.key.ec, BR_KEYTYPE_SIGN);
+					br_x509_knownkey_init_ec(&lsk,
+						&ta[0].pkey.key.ec, BR_KEYTYPE_SIGN);
+					br_ssl_engine_set_x509(ce, &lkk.vtable);
+					br_ssl_engine_set_versions(ce, BR_TLS12, BR_TLS13);
+					br_ssl_engine_set_versions(se, BR_TLS12, BR_TLS13);
+					br_ssl_engine_set_suites(ce, &suites[si], 1);
+					br_ssl_engine_set_suites(se, &suites[si], 1);
+					br_ssl_engine_set_protocol_names(ce, protos, 2);
+					br_ssl_engine_set_protocol_names(se, protos, 2);
+					if (mtls) {
+						br_ssl_client_set_single_ec(&lcc, chain, 1,
+							&sk, BR_KEYTYPE_SIGN, BR_KEYTYPE_EC,
+							br_ec_get_default(),
+							br_ecdsa_sign_asn1_get_default());
+						br_ssl_server_set_trust_anchor_names_alt(
+							&lsc, ta, 1);
+						br_ssl_engine_set_default_rsavrfy(se);
+						br_ssl_engine_set_ecdsa(se,
+							br_ecdsa_vrfy_asn1_get_default());
+						br_ssl_engine_set_x509(se, &lsk.vtable);
+					}
+					if (hrr) {
+						br_ssl_engine_set_ec(se, &no25519);
+					}
+					br_ssl_engine_set_buffer(ce, ib1, sizeof ib1, 1);
+					br_ssl_engine_set_buffer(se, ib2, sizeof ib2, 1);
+					ce->rng_os_rand_done = 1;
+					se->rng_os_rand_done = 1;
+					{
+						/* other random values in each round: the
+						   ticket identifiers must differ */
+						unsigned char sd[32];
+
+						memcpy(sd, seed, 32);
+						sd[1] = (unsigned char)(si * 16 + mtls * 4
+							+ hrr * 2 + round * 8 + 1);
+						br_ssl_engine_inject_entropy(ce, sd, 32);
+						sd[2] = 77;
+						br_ssl_engine_inject_entropy(se, sd, 32);
+					}
+					/* rounds 1 and 2 offer the saved session */
+					if (round == 4) {
+						/* a wrong PSK: the binder is wrong, and the
+						   server must refuse the connection */
+						saved.master_secret[0] ^= 1;
+					}
+					if (round > 0) {
+						br_ssl_engine_set_session_parameters(
+							ce, &saved);
+					}
+					br_ssl_client_reset(&lcc, "localhost",
+						round > 0);
+					br_ssl_server_reset(&lsc);
+
+					got = loop_pump(ce, se);
+					if (round == 4) {
+						H13_CHECK(got == 0
+							&& br_ssl_engine_last_error(se)
+								== BR_ERR_SEND_FATAL_ALERT + 51
+							&& br_ssl_engine_last_error(ce) != 0,
+							"loop: a wrong binder is refused");
+						continue;
+					}
+					if (br_ssl_engine_last_error(ce) != 0
+						|| br_ssl_engine_last_error(se) != 0)
+					{
+						fprintf(stderr, "suite %04x mtls %d hrr %d "
+							"round %d: client error %d, server "
+							"error %d\n", suites[si], mtls, hrr,
+							round, br_ssl_engine_last_error(ce),
+							br_ssl_engine_last_error(se));
+					}
+					if (getenv("LOOP_DEBUG")) {
+						int q;
+
+						fprintf(stderr, "round %d resumed c=%d s=%d\n client psk ",
+							round, ce->tls13_resumed, se->tls13_resumed);
+						for (q = 0; q < 8; q ++) fprintf(stderr, "%02x", ce->tls13_psk[q]);
+						fprintf(stderr, " server psk ");
+						for (q = 0; q < 8; q ++) fprintf(stderr, "%02x", se->tls13_psk[q]);
+						fprintf(stderr, " resm c ");
+						for (q = 0; q < 8; q ++) fprintf(stderr, "%02x", ce->tls13_resm[q]);
+						fprintf(stderr, " s ");
+						for (q = 0; q < 8; q ++) fprintf(stderr, "%02x", se->tls13_resm[q]);
+						fprintf(stderr, "\n ticket c ");
+						for (q = 0; q < 8; q ++) fprintf(stderr, "%02x", ce->session.ticket[q]);
+						fprintf(stderr, " master c ");
+						for (q = 0; q < 8; q ++) fprintf(stderr, "%02x", ce->session.master_secret[q]);
+						fprintf(stderr, " nst count c=%d s=%d\n", ce->tls13_nst_count, se->tls13_nst_count);
+					}
+					H13_CHECK(br_ssl_engine_last_error(ce) == 0
+						&& br_ssl_engine_last_error(se) == 0,
+						"loop: no error");
+					H13_CHECK(ce->session.version == BR_TLS13
+						&& se->session.version == BR_TLS13
+						&& ce->session.cipher_suite == suites[si],
+						"loop: TLS 1.3 and the suite");
+					H13_CHECK(got == 2,
+						"loop: application data both ways");
+					H13_CHECK(lcc.eng.tls13_curve == (hrr ? 23 : 29),
+						"loop: group");
+					H13_CHECK(!strcmp(
+						br_ssl_engine_get_selected_protocol(ce), "h2"),
+						"loop: ALPN");
+					/* the second and third connections resume; the
+					   fourth does not (the server has no ticket) */
+					H13_CHECK((ce->tls13_resumed == 2)
+						== (round == 1 || round == 2)
+						&& (se->tls13_resumed == 2)
+						== (round == 1 || round == 2),
+						"loop: resumption");
+					/* the ticket for the next connection */
+					br_ssl_engine_get_session_parameters(ce, &saved);
+					H13_CHECK(saved.ticket_len == 32
+						&& saved.version == BR_TLS13,
+						"loop: ticket received");
+				}
+			}
+		}
+	}
+	printf("done.\n");
+	fflush(stdout);
+}
+
 #define STU(x)   { &test_ ## x, #x }
 
 static const struct {
@@ -10579,6 +10880,7 @@ static const struct {
 	STU(TLS13_HS),
 	STU(TLS13_REPLAY),
 	STU(TLS13_HRR),
+	STU(TLS13_LOOPBACK),
 	STU(SHAKE),
 	STU(HMAC_DRBG),
 	STU(AESCTR_DRBG),

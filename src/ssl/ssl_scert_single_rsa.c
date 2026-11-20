@@ -83,6 +83,51 @@ sr_do_keyx(const br_ssl_server_policy_class **pctx,
 /*
  * OID for hash functions in RSA signatures.
  */
+/*
+ * TLS 1.3: RSA-PSS with SHA-256, SHA-384 or SHA-512 (bits 20 to 22).
+ */
+static int
+sr_choose13(const br_ssl_server_policy_class **pctx,
+	const br_ssl_server_context *cc, uint32_t sig_algs,
+	br_ssl_server_choices *choices)
+{
+	br_ssl_server_policy_rsa_context *pc;
+	int h;
+
+	pc = (br_ssl_server_policy_rsa_context *)pctx;
+	if (pc->irsapss == 0 || (pc->allowed_usages & BR_KEYTYPE_SIGN) == 0) {
+		return 0;
+	}
+	for (h = 4; h <= 6; h ++) {
+		if (((sig_algs >> (16 + h)) & 1) != 0
+			&& br_multihash_getimpl(&cc->eng.mhash, h) != NULL)
+		{
+			choices->algo_id = 0x0800 + h;
+			choices->chain = pc->chain;
+			choices->chain_len = pc->chain_len;
+			return 1;
+		}
+	}
+	return 0;
+}
+
+static size_t
+sr_do_sign13(const br_ssl_server_policy_class **pctx,
+	const br_hash_class *hf, const br_prng_class **rng,
+	const unsigned char *hv, size_t hv_len,
+	unsigned char *sig, size_t sig_len)
+{
+	br_ssl_server_policy_rsa_context *pc;
+	size_t n;
+
+	pc = (br_ssl_server_policy_rsa_context *)pctx;
+	n = (pc->sk->n_bitlen + 7) >> 3;
+	if (pc->irsapss == 0 || sig_len < n) {
+		return 0;
+	}
+	return pc->irsapss(rng, hf, hf, hv, hv_len, pc->sk, sig) ? n : 0;
+}
+
 static const unsigned char HASH_OID_SHA1[] = {
 	0x05, 0x2B, 0x0E, 0x03, 0x02, 0x1A
 };
@@ -141,7 +186,9 @@ static const br_ssl_server_policy_class sr_policy_vtable = {
 	sizeof(br_ssl_server_policy_rsa_context),
 	sr_choose,
 	sr_do_keyx,
-	sr_do_sign
+	sr_do_sign,
+	sr_choose13,
+	sr_do_sign13
 };
 
 /* see bearssl_ssl.h */
@@ -158,5 +205,6 @@ br_ssl_server_set_single_rsa(br_ssl_server_context *cc,
 	cc->chain_handler.single_rsa.allowed_usages = allowed_usages;
 	cc->chain_handler.single_rsa.irsacore = irsacore;
 	cc->chain_handler.single_rsa.irsasign = irsasign;
+	cc->chain_handler.single_rsa.irsapss = br_rsa_pss_sign_get_default();
 	cc->policy_vtable = &cc->chain_handler.single_rsa.vtable;
 }

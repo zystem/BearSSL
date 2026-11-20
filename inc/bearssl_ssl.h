@@ -811,7 +811,21 @@ extern const br_sslrec_out_ccm_class br_sslrec_out_ccm_vtable;
 /* ===================================================================== */
 
 /**
+ * \brief Largest TLS 1.3 session ticket that a client keeps (in bytes). A
+ * larger ticket is ignored: the connection works, but cannot be resumed.
+ */
+#define BR_TLS13_MAX_TICKET   512
+
+/**
  * \brief Type for session parameters, to be saved for session resumption.
+ *
+ * With TLS 1.3 (`version` is `BR_TLS13`), the session is a PSK: `master_secret`
+ * holds the resumption secret of the ticket (the length of the hash of the
+ * cipher suite; the rest is zero), `ticket_len` and `ticket` the ticket that
+ * the client sends back (`ticket_len` is zero if the session has no usable
+ * ticket), and `session_id` is not used. A server stores, with the session
+ * cache, the sessions that it hands out as tickets: the ticket is a 32-byte
+ * identifier in `session_id`.
  */
 typedef struct {
 	/** \brief Session ID buffer. */
@@ -824,6 +838,14 @@ typedef struct {
 	uint16_t cipher_suite;
 	/** \brief Master secret. */
 	unsigned char master_secret[48];
+	/** \brief TLS 1.3: length of the ticket (0 if there is none). */
+	uint16_t ticket_len;
+	/** \brief TLS 1.3: the "age add" value of the ticket. */
+	uint32_t ticket_age_add;
+	/** \brief TLS 1.3: lifetime of the ticket (in seconds). */
+	uint32_t ticket_lifetime;
+	/** \brief TLS 1.3: the ticket. */
+	unsigned char ticket[BR_TLS13_MAX_TICKET];
 } br_ssl_session_parameters;
 
 #ifndef BR_DOXYGEN_IGNORE
@@ -1055,6 +1077,34 @@ typedef struct {
 	unsigned char tls13_cap[48];
 	unsigned char tls13_sap[48];
 	unsigned char tls13_th[48];
+
+	/*
+	 * TLS 1.3 resumption: the PSK in use or offered (length, hash of its
+	 * suite), 'tls13_resumed' (0 none, 1 offered by the client or found by
+	 * the server, 2 accepted), the identity index chosen by the server, the
+	 * resumption master secret, the binder of the selected identity (server)
+	 * with the hashes of the truncated ClientHello, whether the peer was
+	 * authenticated, and the number of tickets received (client).
+	 */
+	unsigned char tls13_psk[48];
+	unsigned char tls13_psk_len;
+	uint16_t tls13_psk_suite;
+	unsigned char tls13_resumed;
+	unsigned char tls13_psk_idx;
+	unsigned char tls13_resm[48];
+	unsigned char tls13_binder[48];
+	unsigned char tls13_binder_len;
+	unsigned char tls13_bth256[32];
+	unsigned char tls13_bth384[48];
+	unsigned char tls13_authed;
+	unsigned char tls13_nst_count;
+
+	/* Request context of a TLS 1.3 CertificateRequest (to be echoed). */
+	unsigned char tls13_server;
+	unsigned char tls13_initial;
+	unsigned char tls13_neg;
+	unsigned char tls13_creq_len;
+	unsigned char tls13_creq[255];
 
 	/*
 	 * HelloRetryRequest state: 'tls13_hrr' is 0 (none), 1 (a HelloRetryRequest
@@ -2017,6 +2067,43 @@ br_ssl_engine_set_session_parameters(br_ssl_engine_context *cc,
 }
 
 /**
+ * \brief Tell whether the handshake of a TLS 1.3 connection resumed a session.
+ *
+ * Valid once the handshake is complete. It is true for a client that sent a
+ * ticket which the server accepted, and for a server that accepted a
+ * ticket; it is false for a full handshake (and for older protocol
+ * versions: use the session ID there).
+ *
+ * \param cc   SSL engine context.
+ * \return  non-zero if a TLS 1.3 session was resumed.
+ */
+static inline int
+br_ssl_engine_tls13_resumed(const br_ssl_engine_context *cc)
+{
+	return cc->tls13_resumed == 2;
+}
+
+/**
+ * \brief Number of TLS 1.3 session tickets that a client has received and kept
+ * on this connection.
+ *
+ * The server sends its tickets right after the handshake, so they arrive
+ * with the first records that follow it: a client that saves the session
+ * parameters (`br_ssl_engine_get_session_parameters()`) to resume the session
+ * later must do that after this number is above zero (the `ticket_len` field
+ * of the parameters is then non-zero), not when the handshake is complete.
+ * Each ticket replaces the previous one.
+ *
+ * \param cc   SSL engine context.
+ * \return  the number of tickets.
+ */
+static inline unsigned
+br_ssl_engine_tls13_ticket_count(const br_ssl_engine_context *cc)
+{
+	return cc->tls13_nst_count;
+}
+
+/**
  * \brief Get identifier for the curve used for key exchange.
  *
  * If the cipher suite uses ECDHE, then this function returns the
@@ -2616,6 +2703,48 @@ struct br_ssl_client_certificate_class_ {
 	 */
 	size_t (*do_sign)(const br_ssl_client_certificate_class **pctx,
 		int hash_id, size_t hv_len, unsigned char *data, size_t len);
+
+	/**
+	 * \brief Select a certificate for TLS 1.3 client authentication.
+	 *
+	 * `sig_algs` is a bit field of the signature algorithms that the
+	 * server accepts and that the client can verify the hash of
+	 * (it is the `auth_types` format of `choose()`, with the hash
+	 * identifier `h` being 4, 5 or 6 for SHA-256, SHA-384, SHA-512):
+	 * bit `8 + h` (12 to 14) for
+	 * `ecdsa_secp{256,384,521}r1_sha{256,384,512}`, and bit `16 + h`
+	 * (20 to 22) for `rsa_pss_rsae_sha{256,384,512}`.
+	 *
+	 * On return, `choices->auth_type` is `BR_AUTH_RSA` (RSA-PSS) or
+	 * `BR_AUTH_ECDSA`, and `choices->hash_id` is the hash function of
+	 * the algorithm (the one in the algorithm name); `chain` and
+	 * `chain_len` are set. If no certificate is suitable, `hash_id`
+	 * is 0 and `chain_len` is 0. A `NULL` method means that the handler
+	 * cannot do TLS 1.3 client authentication.
+	 *
+	 * \param pctx      certificate handler context.
+	 * \param cc        SSL client context.
+	 * \param sig_algs  acceptable algorithms.
+	 * \param choices   destination structure for the choice.
+	 */
+	void (*choose13)(const br_ssl_client_certificate_class **pctx,
+		const br_ssl_client_context *cc, uint32_t sig_algs,
+		br_ssl_client_certificate *choices);
+
+	/**
+	 * \brief Sign for TLS 1.3 client authentication.
+	 *
+	 * The hash value `hv` (of the CertificateVerify content, with the
+	 * hash function of the chosen algorithm) is signed, with RSA-PSS
+	 * (salt length equal to the hash length) or ECDSA (ASN.1 encoding);
+	 * `rng` is the PRNG for the PSS salt. The signature is written in
+	 * `sig` (of `sig_len` bytes); the returned value is its length, or 0
+	 * on error.
+	 */
+	size_t (*do_sign13)(const br_ssl_client_certificate_class **pctx,
+		int hash_id, const br_prng_class **rng,
+		const unsigned char *hv, size_t hv_len,
+		unsigned char *sig, size_t sig_len);
 };
 
 /**
@@ -2635,6 +2764,8 @@ typedef struct {
 	size_t chain_len;
 	const br_rsa_private_key *sk;
 	br_rsa_pkcs1_sign irsasign;
+	br_rsa_pss_sign irsapss;
+	const br_multihash_context *mhash;
 #endif
 } br_ssl_client_certificate_rsa_context;
 
@@ -2932,6 +3063,7 @@ static inline void
 br_ssl_client_forget_session(br_ssl_client_context *cc)
 {
 	cc->eng.session.session_id_len = 0;
+	cc->eng.session.ticket_len = 0;
 }
 
 /**
@@ -3306,6 +3438,38 @@ struct br_ssl_server_policy_class_ {
 	size_t (*do_sign)(const br_ssl_server_policy_class **pctx,
 		unsigned algo_id,
 		unsigned char *data, size_t hv_len, size_t len);
+
+	/**
+	 * \brief Choose a certificate and a signature algorithm for TLS 1.3.
+	 *
+	 * `sig_algs` is the list of the signature algorithms that the
+	 * client accepts, in the format of `br_ssl_server_get_client_hashes()`:
+	 * bit `8 + h` (12 to 14) for ECDSA with SHA-256, SHA-384, SHA-512
+	 * (`h` is the hash identifier 4, 5, 6; the curve is the one of the
+	 * hash), bit `16 + h` (20 to 22) for RSA-PSS (`rsae`) with SHA-256,
+	 * SHA-384, SHA-512. On success, the function returns 1, and sets
+	 * `choices->algo_id` to the TLS signature scheme (for instance
+	 * `0x0403` or `0x0804`) and `chain`, `chain_len`; it returns 0 if
+	 * no certificate and algorithm fit. A `NULL` method means that
+	 * the handler cannot be used with TLS 1.3.
+	 */
+	int (*choose13)(const br_ssl_server_policy_class **pctx,
+		const br_ssl_server_context *cc, uint32_t sig_algs,
+		br_ssl_server_choices *choices);
+
+	/**
+	 * \brief Sign for TLS 1.3 (CertificateVerify).
+	 *
+	 * `hf` is the hash function of the signature scheme, `hv` the hash
+	 * (of `hv_len` bytes) of the signed content. RSA-PSS (salt length
+	 * equal to the hash length, `rng` for the salt) or ECDSA (ASN.1
+	 * format) is used according to the key. Returned value is the
+	 * signature length (0 on error).
+	 */
+	size_t (*do_sign13)(const br_ssl_server_policy_class **pctx,
+		const br_hash_class *hf, const br_prng_class **rng,
+		const unsigned char *hv, size_t hv_len,
+		unsigned char *sig, size_t sig_len);
 };
 
 /**
@@ -3328,6 +3492,7 @@ typedef struct {
 	unsigned allowed_usages;
 	br_rsa_private irsacore;
 	br_rsa_pkcs1_sign irsasign;
+	br_rsa_pss_sign irsapss;
 #endif
 } br_ssl_server_policy_rsa_context;
 
