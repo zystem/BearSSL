@@ -1,6 +1,6 @@
 # Verifying a release
 
-*Kind: how-to.* **Not run yet: there is no release of this fork when this page was written (2026-11-20). The commands below follow the release workflow and will be run on the first release; the result is then written here.**
+*Kind: how-to.* **Run once, on 2026-11-20, by the maintainer's assistant on one Linux machine, on release `v0.6.1-tls13.0` (cosign 3.0.2): `sha256sum -c` passed; `cosign verify-blob` passed for the archive, the SBOM (20 packages) and the VEX document; `gh attestation verify` of the archive returned exit code 0; the file list of the archive equals `git archive` of the tag. Not run: the check by anyone else, and a check on another machine. The VEX document has a signature but no attestation.**
 
 Every release (a tag `v*`) is built by [`.github/workflows/release.yml`](../.github/workflows/release.yml) on a GitHub-hosted runner, never by hand. The files, the SBOM, the VEX document and their signatures are produced in that one run. Verify before you use: a release that fails any of these checks must not be used; report it as in [SECURITY.md](../SECURITY.md).
 

@@ -1,6 +1,6 @@
 # Making a release
 
-*Kind: how-to.* For the maintainer ([GOVERNANCE.md](../GOVERNANCE.md)). A release is a tag `vX.Y.Z` on `master`; the workflow [`release.yml`](../.github/workflows/release.yml) does the rest: the tests again (`ci.yml`), the source archive, the SBOM and the VEX document, the keyless signatures, the build provenance, and the GitHub release. Nothing needs a secret: the workflow uses the short-lived token of the run. **Not run yet** (2026-11-20): the first release is still to be made.
+*Kind: how-to.* For the maintainer ([GOVERNANCE.md](../GOVERNANCE.md)). A release is a tag `vX.Y.Z` on `master`; the workflow [`release.yml`](../.github/workflows/release.yml) does the rest: the tests again (`ci.yml`), the source archive, the SBOM and the VEX document, the keyless signatures, the build provenance, and the GitHub release. Nothing needs a secret: the workflow uses the short-lived token of the run. The first release, `v0.6.1-tls13.0`, was made with these steps on 2026-11-20: the workflow passed on its first run (CI, then `release`), and the assets were verified as in [verifying-releases.md](verifying-releases.md).
 
 ## Version numbers
 
