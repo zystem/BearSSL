@@ -164,4 +164,69 @@ if command -v gnutls-serv >/dev/null; then
 		pkill -x gnutls-serv >/dev/null 2>&1; { wait; } 2>/dev/null; sleep 1
 	done
 fi
+
+# Session resumption (TLS 1.3 tickets): the client connects twice.
+if command -v openssl >/dev/null; then
+	start_server -cert "$DIR/ec.crt" -key "$DIR/ec.key" -cache 8192
+	( sleep 0.4; echo hi; sleep 1 ) | timeout 15 openssl s_client \
+		-connect 127.0.0.1:$PORT -tls1_3 -CAfile "$DIR/ec.crt" \
+		-sess_out "$DIR/sess.pem" >"$DIR/p1.log" 2>&1
+	( sleep 0.4; echo hi; sleep 1 ) | timeout 15 openssl s_client \
+		-connect 127.0.0.1:$PORT -tls1_3 -CAfile "$DIR/ec.crt" \
+		-sess_in "$DIR/sess.pem" >"$DIR/p2.log" 2>&1
+	ok=1
+	grep -q "^New, TLSv1.3" "$DIR/p1.log" || ok=0
+	grep -q "^Reused, TLSv1.3" "$DIR/p2.log" || ok=0
+	report "openssl client resumes a session of the bear server" $ok
+	stop_server
+fi
+if [ -x "$DIR/goclient" ]; then
+	start_server -cert "$DIR/ec.crt" -key "$DIR/ec.key" -cache 8192
+	"$DIR/goclient" -addr 127.0.0.1:$PORT -ca "$DIR/ec.crt" -resume \
+		>"$DIR/p.log" 2>&1
+	ok=1
+	grep -q "connection 2: .*resumed=true" "$DIR/p.log" || ok=0
+	report "go client resumes a session of the bear server" $ok
+	stop_server
+fi
+if command -v gnutls-cli >/dev/null; then
+	start_server -cert "$DIR/ec.crt" -key "$DIR/ec.key" -cache 8192
+	( sleep 0.4; echo hi; sleep 3 ) | timeout 15 gnutls-cli \
+		--priority "$PRI" -p $PORT localhost --x509cafile "$DIR/ec.crt" \
+		--resume >"$DIR/p.log" 2>&1
+	ok=1
+	grep -q "Resume Handshake was completed" "$DIR/p.log" || ok=0
+	report "gnutls client resumes a session of the bear server" $ok
+	stop_server
+fi
+
+# Our client resumes a session of other servers.
+if [ -f build/libbearssl.a ] && cc -O1 -Isrc -Iinc "$HERE/resume_client.c" \
+	build/libbearssl.a -o "$DIR/resume_client" 2>/dev/null; then
+	if command -v openssl >/dev/null; then
+		( cd "$DIR" && exec openssl s_server -accept $PORT2 \
+			-cert ec.crt -key ec.key -www -quiet >srv.log 2>&1 ) &
+		sleep 1
+		"$DIR/resume_client" 127.0.0.1 $PORT2 >"$DIR/p.log" 2>&1
+		report "bear client resumes a session of the openssl server" $((1 - $?))
+		pkill -x openssl >/dev/null 2>&1; { wait; } 2>/dev/null
+	fi
+	if [ -x "$DIR/goserver" ]; then
+		"$DIR/goserver" -addr 127.0.0.1:$PORT2 -cert "$DIR/ec.crt" \
+			-key "$DIR/ec.key" >"$DIR/gs.log" 2>&1 &
+		sleep 1
+		"$DIR/resume_client" 127.0.0.1 $PORT2 >"$DIR/p.log" 2>&1
+		report "bear client resumes a session of the go server" $((1 - $?))
+		pkill -x goserver >/dev/null 2>&1; { wait; } 2>/dev/null
+	fi
+	if command -v gnutls-serv >/dev/null; then
+		gnutls-serv --port $PORT2 --priority "$PRI" \
+			--x509certfile "$DIR/ec.crt" --x509keyfile "$DIR/ec.key" \
+			>"$DIR/gu.log" 2>&1 &
+		sleep 3
+		"$DIR/resume_client" 127.0.0.1 $PORT2 >"$DIR/p.log" 2>&1
+		report "bear client resumes a session of the gnutls server" $((1 - $?))
+		pkill -x gnutls-serv >/dev/null 2>&1; { wait; } 2>/dev/null
+	fi
+fi
 exit $fail

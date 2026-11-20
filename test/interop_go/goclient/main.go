@@ -19,6 +19,7 @@ func main() {
 	alpn := flag.String("alpn", "", "ALPN protocol")
 	curves := flag.String("curve", "", "single curve: x25519,p256,p384,p521")
 	suite := flag.String("suite", "", "aes128|aes256|chacha")
+	resume := flag.Bool("resume", false, "connect twice and check that the second connection resumes")
 	flag.Parse()
 	pool := x509.NewCertPool()
 	pem, err := os.ReadFile(*ca)
@@ -49,6 +50,27 @@ func main() {
 		cfg.CurvePreferences = []tls.CurveID{tls.CurveP521}
 	}
 	_ = suite // Go does not let a client choose TLS 1.3 suites
+	if *resume {
+		cfg.ClientSessionCache = tls.NewLRUClientSessionCache(4)
+		for i := 0; i < 2; i++ {
+			c, err := tls.Dial("tcp", *addr, cfg)
+			if err != nil {
+				fmt.Println("DIAL ERROR:", err)
+				os.Exit(1)
+			}
+			c.Write([]byte("ping-from-go\n"))
+			c.SetReadDeadline(time.Now().Add(3 * time.Second))
+			buf := make([]byte, 100)
+			io.ReadAtLeast(c, buf, 5) // the session ticket is processed with the first read
+			st := c.ConnectionState()
+			fmt.Printf("connection %d: version=%x suite=%s resumed=%v\n", i+1, st.Version, tls.CipherSuiteName(st.CipherSuite), st.DidResume)
+			c.Close()
+			if i == 1 && !st.DidResume {
+				os.Exit(1)
+			}
+		}
+		return
+	}
 	conn, err := tls.Dial("tcp", *addr, cfg)
 	if err != nil {
 		fmt.Println("DIAL ERROR:", err)
