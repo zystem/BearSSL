@@ -4,6 +4,13 @@ Changes against upstream BearSSL `7bea48e`. Dates 2026. Versions are `X.Y.Z-tls1
 
 ## Unreleased
 
+### Changed
+- The X.509 test vectors in `test/x509` are text (a PEM-like block with Base64) instead of binary DER; `test/test_x509.c` decodes them and the test output is identical. No binary file is tracked any more; `test/style_check.sh` fails if one is.
+
+### Added
+- `test/coverage.sh` and the CI job `coverage` (line coverage of `src/`, floor 80 %); `test/style_check.sh`; `docs/roadmap.md`, `docs/assurance-case.md`, `docs/upgrading.md`.
+- Release tags are signed from the next release on ([docs/verifying-releases.md](docs/verifying-releases.md)).
+
 ## 0.6.1-tls13.0 — 2026-11-20
 
 The first release of the fork. Not independently audited ([docs/explanation-security-status.md](docs/explanation-security-status.md)); no known vulnerability was fixed in it (nothing was released before it). The 24 hour fuzz runs of the TLS 1.3 handshake were not finished when it was made; the trial runs so far found nothing ([docs/testing.md](docs/testing.md)).
