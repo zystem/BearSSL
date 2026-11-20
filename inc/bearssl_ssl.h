@@ -2067,6 +2067,43 @@ br_ssl_engine_set_session_parameters(br_ssl_engine_context *cc,
 }
 
 /**
+ * \brief Tell whether the handshake of a TLS 1.3 connection resumed a session.
+ *
+ * Valid once the handshake is complete. It is true for a client that sent a
+ * ticket which the server accepted, and for a server that accepted a
+ * ticket; it is false for a full handshake (and for older protocol
+ * versions: use the session ID there).
+ *
+ * \param cc   SSL engine context.
+ * \return  non-zero if a TLS 1.3 session was resumed.
+ */
+static inline int
+br_ssl_engine_tls13_resumed(const br_ssl_engine_context *cc)
+{
+	return cc->tls13_resumed == 2;
+}
+
+/**
+ * \brief Number of TLS 1.3 session tickets that a client has received and kept
+ * on this connection.
+ *
+ * The server sends its tickets right after the handshake, so they arrive
+ * with the first records that follow it: a client that saves the session
+ * parameters (`br_ssl_engine_get_session_parameters()`) to resume the session
+ * later must do that after this number is above zero (the `ticket_len` field
+ * of the parameters is then non-zero), not when the handshake is complete.
+ * Each ticket replaces the previous one.
+ *
+ * \param cc   SSL engine context.
+ * \return  the number of tickets.
+ */
+static inline unsigned
+br_ssl_engine_tls13_ticket_count(const br_ssl_engine_context *cc)
+{
+	return cc->tls13_nst_count;
+}
+
+/**
  * \brief Get identifier for the curve used for key exchange.
  *
  * If the cipher suite uses ECDHE, then this function returns the
