@@ -25,6 +25,12 @@ server_basic.c
    in client_basic.c, so the sample client and the sample server can
    be tested against each other.
 
+tls13.h
+
+   A helper for client_basic.c and server_basic.c, compiled in with
+   -DWITH_TLS13: it enables TLS 1.3 (versions and cipher suites). See
+   ../docs/howto-enable-tls13.md.
+
 custom_profile.c
 
    A sample C source file that shows how to write your own client or

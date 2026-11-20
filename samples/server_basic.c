@@ -37,6 +37,9 @@
 #include <unistd.h>
 
 #include "bearssl.h"
+#ifdef WITH_TLS13
+#include "tls13.h"
+#endif
 
 /*
  * This sample code can use three possible certificate chains:
@@ -383,6 +386,9 @@ main(int argc, char *argv[])
 		 * "split the buffer into separate input and output
 		 * areas").
 		 */
+#ifdef WITH_TLS13
+		sample_enable_tls13(&sc.eng);
+#endif
 		br_ssl_engine_set_buffer(&sc.eng, iobuf, sizeof iobuf, 1);
 
 		/*
