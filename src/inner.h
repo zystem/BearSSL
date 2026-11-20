@@ -2349,6 +2349,42 @@ int br_ssl_engine_tls13_key_update(br_ssl_engine_context *cc, int for_input);
 size_t br_ssl_client_tls13_sign(br_ssl_client_context *cc, unsigned *alg);
 
 /*
+ * TLS 1.3 resumption (PSK with (EC)DHE).
+ *
+ * client_psk_prepare: before the ClientHello: decide whether the saved
+ *   session (version, suite, ticket, resumption secret in the engine's
+ *   session parameters) is offered; if so, copy the PSK, set tls13_resumed
+ *   to 1 and return the length of the hash of its suite; 0 otherwise.
+ * binder: compute the binder of the PSK over the transcript so far (the
+ *   truncated ClientHello), in the pad; returns its length.
+ * psk_suite_ok: the selected suite has the hash of the PSK.
+ * res_master: derive the resumption master secret from the master secret
+ *   (key schedule) and the transcript snapshot (up to the client Finished).
+ * client_nst: process a NewSessionTicket received by the client: the
+ *   lifetime, age add, nonce (in the pad) and the ticket are in the session
+ *   parameters (ticket_len is set, the rest filled here); returns 1 if the
+ *   ticket was kept.
+ * server_psk_lookup: look up a 32-byte ticket (in the pad) in the session
+ *   cache of the server; on success the PSK is set (tls13_resumed is 1).
+ * binder_snapshot: save the hashes of the transcript (the truncated
+ *   ClientHello).
+ * binder_check: check the binder received for the PSK; 1 if it is valid.
+ * server_make_ticket: make a ticket and store the session in the cache;
+ *   the NewSessionTicket message is built in the pad, its length returned
+ *   (0 if no ticket is to be sent).
+ */
+unsigned br_ssl_client_tls13_psk_prepare(br_ssl_client_context *cc);
+size_t br_ssl_engine_tls13_binder(br_ssl_engine_context *cc);
+int br_ssl_engine_tls13_psk_suite_ok(br_ssl_engine_context *cc);
+int br_ssl_engine_tls13_res_master(br_ssl_engine_context *cc);
+int br_ssl_engine_tls13_client_nst(br_ssl_engine_context *cc,
+	unsigned lifetime, unsigned age_add, size_t nonce_len);
+int br_ssl_server_tls13_psk_lookup(br_ssl_server_context *cc);
+void br_ssl_engine_tls13_binder_snapshot(br_ssl_engine_context *cc);
+int br_ssl_engine_tls13_binder_check(br_ssl_engine_context *cc);
+size_t br_ssl_server_tls13_make_ticket(br_ssl_server_context *cc);
+
+/*
  * Server side TLS 1.3 helpers.
  * server_choose: call the policy handler's choose13 with the client's
  *   acceptable signature algorithms; sets the chain and the scheme

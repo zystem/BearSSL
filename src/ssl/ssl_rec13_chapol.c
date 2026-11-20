@@ -105,6 +105,17 @@ chapol13_decrypt(br_sslrec13_chapol_context *cc,
 
 	buf = data;
 	len = *data_len - 16;
+#ifdef BR_TLS13_FUZZ
+	/*
+	 * Fuzzing build only: the record body is taken as the plaintext, so
+	 * that a fuzzer controls it without knowing the keys; there is no tag.
+	 */
+	(void)tag;
+	(void)aad;
+	(void)u;
+	(void)bad;
+	cc->seq ++;
+#else
 	chapol13_process(cc, *data_len, buf, len, tag, 0, aad);
 	bad = 0;
 	for (u = 0; u < 16; u ++) {
@@ -113,6 +124,7 @@ chapol13_decrypt(br_sslrec13_chapol_context *cc,
 	if (bad) {
 		return NULL;
 	}
+#endif
 
 	/*
 	 * Remove zero padding: the inner type is the last non-zero byte.

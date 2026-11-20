@@ -1,0 +1,13 @@
+--- a/bearssl/abi/bearssl_ssl.nim	2026-11-01 10:14:53.058428405 +0200
++++ b/bearssl/abi/bearssl_ssl.nim	2026-11-19 23:37:56.965693287 +0200
+@@ -13,6 +13,10 @@
+ {.compile: bearSrcPath & "ssl/ssl_ccert_single_rsa.c".}
+ {.compile: bearSrcPath & "ssl/ssl_hs_server.c".}
+ {.compile: bearSrcPath & "ssl/ssl_scert_single_rsa.c".}
++{.compile: bearSrcPath & "ssl/ssl_tls13_ks.c".}
++{.compile: bearSrcPath & "ssl/ssl_tls13_hs.c".}
++{.compile: bearSrcPath & "ssl/ssl_rec13_gcm.c".}
++{.compile: bearSrcPath & "ssl/ssl_rec13_chapol.c".}
+ 
+ type
+   ConstPtrConstPtrSslrecInClass* {.importc: "const br_sslrec_in_class *const *", header: "bearssl_ssl.h", bycopy.} = pointer

@@ -701,13 +701,86 @@ cc: tls13-sigalgs-list ( -- len ) {
 	T0_PUSH((uint32_t)n);
 }
 
+\ Session tickets (TLS 1.3 resumption), see ssl_tls13_hs.c.
+
+\ Look up the ticket in the pad in the session cache (true if found).
+cc: tls13-psk-lookup ( -- bool ) {
+	T0_PUSHi(-(br_ssl_server_tls13_psk_lookup(CTX) != 0));
+}
+
+\ Save the transcript hashes (the truncated ClientHello).
+cc: tls13-binder-snapshot ( -- ) {
+	br_ssl_engine_tls13_binder_snapshot(ENG);
+}
+
+\ Check the binder of the selected identity (true if it is valid).
+cc: tls13-binder-check ( -- bool ) {
+	T0_PUSHi(-(br_ssl_engine_tls13_binder_check(ENG) != 0));
+}
+
+\ Make a ticket; the NewSessionTicket message is in the pad, its length is
+\ returned (0 if no ticket is sent).
+cc: tls13-srv-make-ticket ( -- len ) {
+	T0_PUSH((uint32_t)br_ssl_server_tls13_make_ticket(CTX));
+}
+
+\ Read the psk_key_exchange_modes extension: bit 1 of tls13_neg is set if
+\ the client accepts psk_dhe_ke (the only mode that we use).
+: read-client-pskmodes ( lim -- lim )
+	read16 open-elt
+	read8 open-elt
+	begin dup while
+		read8 1 = if addr-tls13_neg get8 2 or addr-tls13_neg set8 then
+	repeat
+	close-elt
+	close-elt ;
+
+\ Read the pre_shared_key extension: the first identity that is a ticket of
+\ ours (32 bytes, found in the session cache) is selected, and the binder
+\ at the same position is kept. The hashes of the ClientHello up to the
+\ binders are saved, for the check of the binder.
+: read-client-psk ( lim -- lim )
+	read16 open-elt
+	read16 open-elt
+	0 { idx }
+	begin dup while
+		read16 { idlen }
+		idlen 32 = addr-tls13_resumed get8 0= and if
+			addr-pad 32 read-blob
+			tls13-psk-lookup if idx addr-tls13_psk_idx set8 then
+		else
+			idlen skip-blob
+		then
+		4 skip-blob
+		idx 1+ >idx
+	repeat
+	close-elt
+	tls13-binder-snapshot
+	read16 open-elt
+	0 >idx
+	begin dup while
+		read8 { blen }
+		addr-tls13_resumed get8 0<>
+		idx addr-tls13_psk_idx get8 = and
+		blen 49 < and
+		if
+			blen addr-tls13_binder_len set8
+			addr-tls13_binder blen read-blob
+		else
+			blen skip-blob
+		then
+		idx 1+ >idx
+	repeat
+	close-elt
+	close-elt ;
+
 \ Read the supported_versions extension of the ClientHello: the client
 \ supports TLS 1.3 if 0x0304 is in the list.
 : read-client-versions ( lim -- lim )
 	read16 open-elt
 	read8 open-elt
 	begin dup while
-		read16 0x0304 = if 1 addr-tls13_neg set8 then
+		read16 0x0304 = if addr-tls13_neg get8 1 or addr-tls13_neg set8 then
 	repeat
 	close-elt
 	close-elt ;
@@ -747,8 +820,24 @@ cc: tls13-sigalgs-list ( -- len ) {
 	0x0304 addr-version set16
 	0x0303 addr-version_in set16
 	0x0303 addr-version_out set16
+	\ ALPN first, as with TLS 1.2: a refusal is reported before the policy
+	\ handler is called.
+	addr-selected_protocol get16 0xFFFF = if
+		3 flag? if 120 fail-alert then
+		0 addr-selected_protocol set16
+	then
+	\ A ticket is used only with psk_dhe_ke.
+	addr-tls13_neg get8 2 and ifnot 0 addr-tls13_resumed set8 then
 	tls13-srv-pick-suite ifnot 40 fail-alert then
-	addr-hashes get32 tls13-srv-choose ifnot 40 fail-alert then
+	addr-tls13_resumed get8 if
+		\ The binder proves that the client knows the PSK.
+		tls13-binder-check ifnot 51 fail-alert then
+		2 addr-tls13_resumed set8
+		1 addr-tls13_authed set8
+	else
+		0 addr-tls13_authed set8
+		addr-hashes get32 tls13-srv-choose ifnot 40 fail-alert then
+	then
 	addr-ecdhe_point_len get8 if
 		\ After a HelloRetryRequest, the share must be for the group
 		\ that we asked for.
@@ -762,10 +851,6 @@ cc: tls13-sigalgs-list ( -- len ) {
 		addr-tls13_hrr get8 if 47 fail-alert then
 		tls13-srv-pick-group dup ifnot drop 40 fail-alert then
 		addr-tls13_hrr_group set8
-	then
-	addr-selected_protocol get16 0xFFFF = if
-		3 flag? if 120 fail-alert then
-		0 addr-selected_protocol set16
 	then ;
 
 \ Read and drop ClientHello. This is used when a client-triggered
@@ -781,6 +866,8 @@ cc: tls13-sigalgs-list ( -- len ) {
 	read-handshake-header 1 = ifnot ERR_UNEXPECTED fail then
 	0 addr-tls13_neg set8
 	0 addr-ecdhe_point_len set8
+	0 addr-tls13_resumed set8
+	0 addr-tls13_binder_len set8
 
 	\ Get maximum protocol version from client.
 	read16 dup { client-version-max } addr-client_max_version set16
@@ -935,6 +1022,14 @@ cc: tls13-sigalgs-list ( -- len ) {
 				\ Key Share (TLS 1.3).
 				0x0033 of
 					read-client-keyshare
+				endof
+				\ PSK key exchange modes and pre-shared key (TLS 1.3
+				\ resumption).
+				0x002D of
+					read-client-pskmodes
+				endof
+				0x0029 of
+					read-client-psk
 				endof
 
 				\ Other extensions are ignored.
@@ -1573,8 +1668,9 @@ cc: verify-CV-sig ( sig-len -- err ) {
 : write-ServerHello13 ( -- )
 	addr-tls13_pub_len get8 { plen }
 	addr-session_id_len get8 { idlen }
+	addr-tls13_resumed get8 2 = if 6 else 0 then { pskext }
 	2 write8
-	54 idlen + plen + write24
+	54 idlen + plen + pskext + write24
 	0x0303 write16
 	addr-server_random 32 mkrand
 	addr-server_random 32 write-blob
@@ -1582,12 +1678,15 @@ cc: verify-CV-sig ( sig-len -- err ) {
 	addr-session_id idlen write-blob
 	addr-cipher_suite get16 write16
 	0 write8
-	plen 14 + write16
+	plen 14 + pskext + write16
 	0x002B write16 2 write16 0x0304 write16
 	0x0033 write16 plen 4 + write16
 	addr-tls13_curve get8 write16
 	plen write16
-	addr-tls13_pub plen write-blob ;
+	addr-tls13_pub plen write-blob
+	pskext if
+		0x0029 write16 2 write16 addr-tls13_psk_idx get8 write16
+	then ;
 
 \ Write a HelloRetryRequest asking for the group in tls13_hrr_group.
 : write-HelloRetryRequest ( -- )
@@ -1719,6 +1818,9 @@ cc: verify-CV-sig ( sig-len -- err ) {
 	1 addr-tls13_hrr set8
 	write-HelloRetryRequest
 	flush-record
+	\ The second ClientHello is read as the first one (a client may send
+	\ the renegotiation_info extension again).
+	0 addr-reneg set8
 	read-ClientHello drop
 	more-incoming-bytes? if ERR_UNEXPECTED fail then
 	addr-version get16 0x0304 = ifnot ERR_BAD_VERSION fail then ;
@@ -1746,11 +1848,14 @@ cc: verify-CV-sig ( sig-len -- err ) {
 
 	\ The server flight.
 	write-EncryptedExtensions13
-	ta-names-total-length if write-CertificateRequest13 then
-	0 addr-tls13_creq_len set8
-	write-Certificate13
-	tls13-snapshot
-	write-CertificateVerify13s
+	\ A resumed session has no authentication.
+	addr-tls13_resumed get8 2 = ifnot
+		ta-names-total-length if write-CertificateRequest13 then
+		0 addr-tls13_creq_len set8
+		write-Certificate13
+		tls13-snapshot
+		write-CertificateVerify13s
+	then
 	tls13-snapshot
 	0 tls13-finished-gen
 	20 write8 dup write24 addr-pad swap write-blob
@@ -1760,7 +1865,7 @@ cc: verify-CV-sig ( sig-len -- err ) {
 	0 1 tls13-switch
 
 	\ The client flight: certificate and verification, if requested.
-	ta-names-total-length if
+	addr-tls13_resumed get8 2 = 0= ta-names-total-length and if
 		read-handshake-header 11 = ifnot ERR_UNEXPECTED fail then
 		read-Certificate13c
 		dup 0< if
@@ -1779,6 +1884,7 @@ cc: verify-CV-sig ( sig-len -- err ) {
 			else
 				tls13-snapshot
 				read-CertificateVerify13c
+				1 addr-tls13_authed set8
 			then
 		then
 	then
@@ -1790,7 +1896,26 @@ cc: verify-CV-sig ( sig-len -- err ) {
 	addr-pad 256 + tls13-hlen read-blob
 	close-elt
 	tls13-check-finished-client ifnot ERR_BAD_FINISHED fail then
-	1 1 tls13-switch ;
+	1 1 tls13-switch
+
+	\ The resumption master secret (the transcript up to the client
+	\ Finished), and a ticket for the client.
+	tls13-snapshot
+	tls13-res-master ;
+
+\ Send a NewSessionTicket after a TLS 1.3 handshake. This is done once the
+\ connection is in the application data state (the client may already send
+\ data, which the engine must accept); the message is built before the wait
+\ and written without interruption.
+: send-NewSessionTicket13 ( -- )
+	tls13-srv-make-ticket dup if
+		22 wait-rectype-out
+		addr-pad swap write-blob
+		flush-record
+		23 wait-rectype-out
+	else
+		drop
+	then ;
 
 \ Send a HelloRequest.
 : send-HelloRequest ( -- )
@@ -1883,7 +2008,10 @@ cc: verify-CV-sig ( sig-len -- err ) {
 : main ( -- ! )
 	\ Perform initial handshake.
 	-1 do-handshake
-	addr-version get16 0x0304 = if main13 then
+	addr-version get16 0x0304 = if
+		send-NewSessionTicket13
+		main13
+	then
 
 	begin
 		\ Wait for further invocation. At that point, we should

@@ -198,6 +198,14 @@ addr-eng: selected_protocol
 addr-eng: tls13_pub
 addr-eng: tls13_pub_len
 addr-eng: tls13_curve
+addr-eng: tls13_psk_len
+addr-eng: tls13_psk_suite
+addr-eng: tls13_resumed
+addr-eng: tls13_psk_idx
+addr-eng: tls13_binder
+addr-eng: tls13_binder_len
+addr-eng: tls13_authed
+addr-eng: tls13_nst_count
 addr-eng: tls13_server
 addr-eng: tls13_initial
 addr-eng: tls13_neg
@@ -221,6 +229,10 @@ addr-session-field: session_id_len
 addr-session-field: version
 addr-session-field: cipher_suite
 addr-session-field: master_secret
+addr-session-field: ticket_len
+addr-session-field: ticket
+addr-session-field: ticket_age_add
+addr-session-field: ticket_lifetime
 
 \ Check a server flag by index.
 : flag? ( index -- bool )
@@ -427,6 +439,51 @@ cc: tls13-key-update ( for-input -- ) {
 		br_ssl_engine_fail(ENG, BR_ERR_BAD_STATE);
 		T0_CO();
 	}
+}
+
+\ TLS 1.3 resumption helpers (see ssl_tls13_hs.c).
+
+\ Client: offer the saved session, if any; returns the hash length of its
+\ suite, or 0.
+cc: tls13-psk-prepare ( -- hlen ) {
+	T0_PUSH(br_ssl_client_tls13_psk_prepare((br_ssl_client_context *)ENG));
+}
+
+\ Compute the binder of the PSK over the transcript so far, in the pad;
+\ returns its length.
+cc: tls13-binder ( -- len ) {
+	size_t n = br_ssl_engine_tls13_binder(ENG);
+
+	if (n == 0) {
+		br_ssl_engine_fail(ENG, BR_ERR_BAD_STATE);
+		T0_CO();
+	}
+	T0_PUSH((uint32_t)n);
+}
+
+\ True if the selected suite has the hash of the PSK.
+cc: tls13-psk-suite-ok ( -- bool ) {
+	T0_PUSHi(-(br_ssl_engine_tls13_psk_suite_ok(ENG) != 0));
+}
+
+\ Derive the resumption master secret (the snapshot of the transcript must
+\ be up to the client Finished).
+cc: tls13-res-master ( -- ) {
+	if (!br_ssl_engine_tls13_res_master(ENG)) {
+		br_ssl_engine_fail(ENG, BR_ERR_BAD_STATE);
+		T0_CO();
+	}
+}
+
+\ A NewSessionTicket was read (client): the ticket is in the session
+\ parameters, the nonce in the pad; true if the session was kept.
+cc: tls13-client-nst ( lifetime age nonce-len -- bool ) {
+	size_t nonce_len = T0_POP();
+	unsigned age = T0_POP();
+	unsigned lifetime = T0_POP();
+
+	T0_PUSHi(-(br_ssl_engine_tls13_client_nst(ENG, lifetime, age,
+		nonce_len) != 0));
 }
 
 \ Value of our record_size_limit extension (RFC 8449, TLS 1.3): the largest
@@ -793,6 +850,11 @@ cc: more-incoming-bytes? ( -- bool ) {
 \ Read a 24-bit value (in the 0..16777215 range)
 : read24 ( lim -- lim n )
 	3 check-len read8-nc 8 << read8-nc + 8 << read8-nc + ;
+
+\ Read a 32-bit value (the top bit is the sign in T0 integers; the values
+\ that we read here are below 2^31 or are used as bit patterns)
+: read32 ( lim -- lim n )
+	read16 { hi } read16 hi 16 << + ;
 
 \ Read some bytes. The "address" is an offset within the context
 \ structure.
@@ -1660,6 +1722,26 @@ cc: tls13-chain-length ( -- len ) {
 		0 write16
 	again ;
 
+\ Read a NewSessionTicket (client): the ticket of the server is kept in the
+\ session parameters, with the PSK made from it (if it is not too large).
+: read-NewSessionTicket13 ( lim -- )
+	read32 { lifetime }
+	read32 { age }
+	read8 { nlen }
+	addr-pad nlen read-blob
+	read16 { tlen }
+	tlen 512 > if
+		tlen skip-blob
+		read16 skip-blob
+		close-elt
+	else
+		addr-ticket tlen read-blob
+		tlen addr-ticket_len set16
+		read16 skip-blob
+		close-elt
+		lifetime age nlen tls13-client-nst drop
+	then ;
+
 \ Process a handshake message received after the TLS 1.3 handshake:
 \ NewSessionTicket is ignored (no resumption yet); KeyUpdate is applied
 \ and, if requested, answered.
@@ -1667,8 +1749,12 @@ cc: tls13-chain-length ( -- len ) {
 	read-handshake-header
 	case
 		4 of
-			dup skip-blob
-			close-elt
+			addr-tls13_server get8 if
+				dup skip-blob
+				close-elt
+			else
+				read-NewSessionTicket13
+			then
 		endof
 		24 of
 			read8 { request }

@@ -811,7 +811,21 @@ extern const br_sslrec_out_ccm_class br_sslrec_out_ccm_vtable;
 /* ===================================================================== */
 
 /**
+ * \brief Largest TLS 1.3 session ticket that a client keeps (in bytes). A
+ * larger ticket is ignored: the connection works, but cannot be resumed.
+ */
+#define BR_TLS13_MAX_TICKET   512
+
+/**
  * \brief Type for session parameters, to be saved for session resumption.
+ *
+ * With TLS 1.3 (`version` is `BR_TLS13`), the session is a PSK: `master_secret`
+ * holds the resumption secret of the ticket (the length of the hash of the
+ * cipher suite; the rest is zero), `ticket_len` and `ticket` the ticket that
+ * the client sends back (`ticket_len` is zero if the session has no usable
+ * ticket), and `session_id` is not used. A server stores, with the session
+ * cache, the sessions that it hands out as tickets: the ticket is a 32-byte
+ * identifier in `session_id`.
  */
 typedef struct {
 	/** \brief Session ID buffer. */
@@ -824,6 +838,14 @@ typedef struct {
 	uint16_t cipher_suite;
 	/** \brief Master secret. */
 	unsigned char master_secret[48];
+	/** \brief TLS 1.3: length of the ticket (0 if there is none). */
+	uint16_t ticket_len;
+	/** \brief TLS 1.3: the "age add" value of the ticket. */
+	uint32_t ticket_age_add;
+	/** \brief TLS 1.3: lifetime of the ticket (in seconds). */
+	uint32_t ticket_lifetime;
+	/** \brief TLS 1.3: the ticket. */
+	unsigned char ticket[BR_TLS13_MAX_TICKET];
 } br_ssl_session_parameters;
 
 #ifndef BR_DOXYGEN_IGNORE
@@ -1055,6 +1077,27 @@ typedef struct {
 	unsigned char tls13_cap[48];
 	unsigned char tls13_sap[48];
 	unsigned char tls13_th[48];
+
+	/*
+	 * TLS 1.3 resumption: the PSK in use or offered (length, hash of its
+	 * suite), 'tls13_resumed' (0 none, 1 offered by the client or found by
+	 * the server, 2 accepted), the identity index chosen by the server, the
+	 * resumption master secret, the binder of the selected identity (server)
+	 * with the hashes of the truncated ClientHello, whether the peer was
+	 * authenticated, and the number of tickets received (client).
+	 */
+	unsigned char tls13_psk[48];
+	unsigned char tls13_psk_len;
+	uint16_t tls13_psk_suite;
+	unsigned char tls13_resumed;
+	unsigned char tls13_psk_idx;
+	unsigned char tls13_resm[48];
+	unsigned char tls13_binder[48];
+	unsigned char tls13_binder_len;
+	unsigned char tls13_bth256[32];
+	unsigned char tls13_bth384[48];
+	unsigned char tls13_authed;
+	unsigned char tls13_nst_count;
 
 	/* Request context of a TLS 1.3 CertificateRequest (to be echoed). */
 	unsigned char tls13_server;
@@ -2024,6 +2067,43 @@ br_ssl_engine_set_session_parameters(br_ssl_engine_context *cc,
 }
 
 /**
+ * \brief Tell whether the handshake of a TLS 1.3 connection resumed a session.
+ *
+ * Valid once the handshake is complete. It is true for a client that sent a
+ * ticket which the server accepted, and for a server that accepted a
+ * ticket; it is false for a full handshake (and for older protocol
+ * versions: use the session ID there).
+ *
+ * \param cc   SSL engine context.
+ * \return  non-zero if a TLS 1.3 session was resumed.
+ */
+static inline int
+br_ssl_engine_tls13_resumed(const br_ssl_engine_context *cc)
+{
+	return cc->tls13_resumed == 2;
+}
+
+/**
+ * \brief Number of TLS 1.3 session tickets that a client has received and kept
+ * on this connection.
+ *
+ * The server sends its tickets right after the handshake, so they arrive
+ * with the first records that follow it: a client that saves the session
+ * parameters (`br_ssl_engine_get_session_parameters()`) to resume the session
+ * later must do that after this number is above zero (the `ticket_len` field
+ * of the parameters is then non-zero), not when the handshake is complete.
+ * Each ticket replaces the previous one.
+ *
+ * \param cc   SSL engine context.
+ * \return  the number of tickets.
+ */
+static inline unsigned
+br_ssl_engine_tls13_ticket_count(const br_ssl_engine_context *cc)
+{
+	return cc->tls13_nst_count;
+}
+
+/**
  * \brief Get identifier for the curve used for key exchange.
  *
  * If the cipher suite uses ECDHE, then this function returns the
@@ -2983,6 +3063,7 @@ static inline void
 br_ssl_client_forget_session(br_ssl_client_context *cc)
 {
 	cc->eng.session.session_id_len = 0;
+	cc->eng.session.ticket_len = 0;
 }
 
 /**
