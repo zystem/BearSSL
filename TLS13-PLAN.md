@@ -95,7 +95,7 @@ The TLS 1.3 code is linked whether or not a program enables it (there is no comp
 | TLS 1.3 ChaCha20-Poly1305, fork | 0.737 ms | 0.339 ms | 1.088 ms |
 | TLS 1.3, client authentication, fork | 0.920 ms | 0.901 ms | 1.833 ms |
 
-TLS 1.2 speed is unchanged; a TLS 1.3 handshake takes about 19 % less CPU than TLS 1.2 (the server about 40 % less: X25519 instead of P-256 for the key exchange, and the key schedule is a few HMAC calls). Not measured: RSA keys, other machines, record throughput, memory use (the engine context grew by about 1 KB).
+TLS 1.2 speed is unchanged; a TLS 1.3 handshake takes about 19 % less CPU than TLS 1.2 (the server about 40 % less: X25519 instead of P-256 for the key exchange, and the key schedule is a few HMAC calls). Not measured: RSA keys, other machines, record throughput, memory use (the engine context grew from 3616 to 5200 bytes, the client context from 3720 to 5304: +1584 bytes each).
 
 Rough effort (estimate, not measured): client only, steps 1-3: 6-8 weeks. Whole plan to step 8: 3-5 months.
 
