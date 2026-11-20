@@ -24,6 +24,7 @@
 
 #include "bearssl.h"
 #include "fuzz_keys.h"
+#include "fuzz_session.h"
 
 #if !defined FUZZ_CLIENT && !defined FUZZ_SERVER
 #error "define FUZZ_CLIENT or FUZZ_SERVER"
@@ -92,6 +93,8 @@ static br_ssl_server_context cc;
 static br_x509_minimal_context xc;
 static br_x509_knownkey_context kk;
 static unsigned char iobuf[BR_SSL_BUFSIZE_BIDI];
+static br_ssl_session_cache_lru lru;
+static unsigned char lru_buf[4096];
 
 static br_ssl_engine_context *
 setup(uint8_t cfg)
@@ -141,8 +144,17 @@ setup(uint8_t cfg)
 	eng->rng_os_rand_done = 1;
 	br_ssl_engine_inject_entropy(eng, seed, sizeof seed);
 #ifdef FUZZ_CLIENT
-	br_ssl_client_reset(&cc, "localhost", 0);
+	if (cfg & 0x40) {
+		/* a saved session: the PSK is offered */
+		br_ssl_session_parameters sp;
+
+		fuzz_session(&sp);
+		br_ssl_engine_set_session_parameters(eng, &sp);
+	}
+	br_ssl_client_reset(&cc, "localhost", (cfg & 0x40) != 0);
 #else
+	/* a session cache with the ticket (the server always has one) */
+	fuzz_server_cache(&cc, &lru, lru_buf, sizeof lru_buf);
 	br_ssl_server_reset(&cc);
 #endif
 	return eng;

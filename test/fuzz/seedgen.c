@@ -16,6 +16,7 @@
 
 #include "bearssl.h"
 #include "fuzz_keys.h"
+#include "fuzz_session.h"
 
 static unsigned
 br_dec16be(const unsigned char *p)
@@ -223,8 +224,12 @@ static br_x509_knownkey_context ckk, skk;
 static unsigned char ibuf1[BR_SSL_BUFSIZE_BIDI], ibuf2[BR_SSL_BUFSIZE_BIDI];
 static br_ec_impl p256only;
 
+static br_ssl_session_cache_lru lru;
+static unsigned char lru_buf[4096];
+
 static void
-run(const char *dir, int num, const uint16_t *suites, int mtls, int hrr)
+run(const char *dir, int num, const uint16_t *suites, int mtls, int hrr,
+	int resume)
 {
 	br_ssl_engine_context *ce = &cc.eng, *se = &sc.eng;
 	stream toclient = { NULL, 0 }, toserver = { NULL, 0 };
@@ -269,7 +274,14 @@ run(const char *dir, int num, const uint16_t *suites, int mtls, int hrr)
 	br_ssl_engine_inject_entropy(ce, seed, 32);
 	seed[0] = 10;
 	br_ssl_engine_inject_entropy(se, seed, 32);
-	br_ssl_client_reset(&cc, "localhost", 0);
+	if (resume) {
+		br_ssl_session_parameters sp;
+
+		fuzz_session(&sp);
+		br_ssl_engine_set_session_parameters(ce, &sp);
+		fuzz_server_cache(&sc, &lru, lru_buf, sizeof lru_buf);
+	}
+	br_ssl_client_reset(&cc, "localhost", resume);
 	br_ssl_server_reset(&sc);
 
 	for (u = 0; u < 2000; u ++) {
@@ -355,15 +367,20 @@ run(const char *dir, int num, const uint16_t *suites, int mtls, int hrr)
 		fprintf(stderr, "not TLS 1.3\n");
 		exit(1);
 	}
+	if (resume && (ce->tls13_resumed != 2 || se->tls13_resumed != 2)) {
+		fprintf(stderr, "%s %d: the session was not resumed\n", dir, num);
+		exit(1);
+	}
 	/* the key update seed: a KeyUpdate record from each side is made by
 	   the fuzzer from the mutation of the application records */
 	for (u = 0; u < 2; u ++) {
 		stream *s = u ? &toserver : &toclient;
-		unsigned char cfg = (unsigned char)(0x01 | (mtls ? 0x02 : 0));
+		unsigned char cfg = (unsigned char)(0x01 | (mtls ? 0x02 : 0)
+			| (resume ? 0x40 : 0));
 
-		snprintf(name, sizeof name, "%s/%s/seed-%d%s%s", dir,
+		snprintf(name, sizeof name, "%s/%s/seed-%d%s%s%s", dir,
 			u ? "server" : "client", num, mtls ? "-mtls" : "",
-			hrr ? "-hrr" : "");
+			hrr ? "-hrr" : "", resume ? "-resume" : "");
 		f = fopen(name, "wb");
 		if (f == NULL) {
 			perror(name);
@@ -413,7 +430,12 @@ main(int argc, char **argv)
 	for (i = 0; i < 3; i ++) {
 		for (m = 0; m < 2; m ++) {
 			for (h = 0; h < 2; h ++) {
-				run(argv[1], i + 1, su[i], m, h);
+				run(argv[1], i + 1, su[i], m, h, 0);
+				/* resumption: PSK of the SHA-256 suites only,
+				   and without client authentication */
+				if (i != 1 && !m) {
+					run(argv[1], i + 1, su[i], m, h, 1);
+				}
 			}
 		}
 	}

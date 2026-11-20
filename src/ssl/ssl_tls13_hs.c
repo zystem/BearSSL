@@ -817,6 +817,14 @@ br_ssl_engine_tls13_binder_check(br_ssl_engine_context *cc)
 	if (cc->tls13_psk_suite == 0 || cc->tls13_resumed == 0) {
 		return 0;
 	}
+#ifdef BR_TLS13_FUZZ
+	/* Fuzzing build only: every binder is accepted. */
+	(void)exp;
+	(void)hlen;
+	(void)u;
+	(void)bad;
+	return 1;
+#endif
 	hlen = compute_binder(cc, (cc->tls13_psk_suite == 0x1302)
 		? cc->tls13_bth384 : cc->tls13_bth256, exp);
 	if (hlen == 0 || cc->tls13_binder_len != hlen) {
