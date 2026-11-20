@@ -34,6 +34,19 @@ jobs:
         run: sh test/docs_check.sh
       - name: TLS 1.3 client against OpenSSL
         run: sh test/interop_openssl13.sh
+      - name: Coding standard of the files this fork added
+        run: sh test/style_check.sh
+
+  # line coverage of src/ by the tests; fails below 80%
+  coverage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run the tests with gcov and add up the lines of src/
+        run: MIN=80 sh test/coverage.sh
 
   # the same unit tests with AddressSanitizer and UndefinedBehaviorSanitizer
   # (the alignment check is off: BearSSL does some unaligned reads on purpose)

@@ -47,8 +47,10 @@ sock_write(void *ctx, const unsigned char *buf, size_t len)
 	}
 }
 
-/* An X.509 class that accepts any chain and returns the key of the first
-   certificate (there is no validation: this program tests the protocol). */
+/*
+ * An X.509 class that accepts any chain and returns the key of the first
+ * certificate (there is no validation: this program tests the protocol).
+ */
 typedef struct {
 	const br_x509_class *vtable;
 	br_x509_decoder_context dec;
@@ -167,7 +169,8 @@ main(int argc, char **argv)
 		br_sslio_flush(&ioc);
 		n = br_sslio_read(&ioc, buf, sizeof buf);
 		br_ssl_engine_get_session_parameters(eng, &sp);
-		printf("connection %d: %s, suite %04x, %s, %d bytes read, ticket %u bytes, error %d\n",
+		printf("connection %d: %s, suite %04x, %s, %d bytes read, "
+			"ticket %u bytes, error %d\n",
 			round + 1, sp.version == BR_TLS13 ? "TLS 1.3" : "other",
 			sp.cipher_suite,
 			eng->tls13_resumed == 2 ? "RESUMED" : "full handshake", n,

@@ -1,5 +1,7 @@
 # BearSSL with TLS 1.3
 
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/16956/badge)](https://www.bestpractices.dev/projects/16956)
+
 BearSSL is a small, constant-time TLS library in C that does not call `malloc`; this fork adds a TLS 1.3 client and server to it.
 
 **This code has not been audited by anyone outside the project.** The TLS 1.3 handshake is new protocol logic written in 2026. It was tested against OpenSSL, GnuTLS and Go (see [what was run](docs/testing.md)) and fuzzed, and that is all. Read [Security status](docs/explanation-security-status.md) before you use it for anything that matters.
