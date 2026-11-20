@@ -19,7 +19,10 @@ PAGES = ["README.md", "docs/howto-enable-tls13.md", "docs/howto-mutual-tls.md",
 ALL = PAGES + ["docs/README.md", "docs/reference-api.md", "docs/supported-versions.md",
                "docs/troubleshooting.md", "docs/faq.md", "docs/production-checklist.md",
                "docs/explanation-design.md", "docs/explanation-security-status.md",
-               "docs/testing.md", "CHANGELOG.md", "contrib/nim/README.md"]
+               "docs/testing.md", "CHANGELOG.md", "contrib/nim/README.md",
+               "CONTRIBUTING.md", "SECURITY.md", "GOVERNANCE.md", "CODE_OF_CONDUCT.md", "DCO.md",
+               "docs/building.md", "docs/architecture.md", "docs/threat-model.md",
+               "docs/security-policies.md", "docs/verifying-releases.md", "docs/releasing.md"]
 fails = []
 checked = 0
 
@@ -49,7 +52,7 @@ def subseq(expected, actual):
 
 def run(cmd, bg):
     f = tempfile.NamedTemporaryFile("w+", delete=False)
-    p = subprocess.Popen(["bash", "-c", cmd], cwd=ROOT, stdout=f,
+    p = subprocess.Popen(["bash", "-c", cmd], cwd=ROOT, stdin=subprocess.DEVNULL, stdout=f,
                          stderr=subprocess.STDOUT, text=True, start_new_session=True)
     p.outfile = f
     return p
@@ -93,7 +96,7 @@ def check_page(page):
             p = run(body, bg)
             if bg:
                 bgs.append((body, expected, p))
-                time.sleep(1.5)
+                time.sleep(2.5)
                 continue
             try:
                 out = lines_of(p, False)

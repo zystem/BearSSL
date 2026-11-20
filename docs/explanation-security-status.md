@@ -24,4 +24,4 @@
 
 ## Reporting a problem
 
-Open an issue on https://github.com/zystem/BearSSL. For a security problem, do not put the details in the issue: say that you have one and ask for a private way to send it (there is no `SECURITY.md` and no private reporting channel set up yet). Problems in code that this fork did not change belong to upstream.
+Open an issue on https://github.com/zystem/BearSSL. For a security problem, do not put the details in the issue: use GitHub's private vulnerability reporting, as [SECURITY.md](../SECURITY.md) says. Problems in code that this fork did not change belong to upstream.

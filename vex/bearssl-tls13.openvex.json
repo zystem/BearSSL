@@ -1,0 +1,8 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://github.com/zystem/BearSSL/vex/bearssl-tls13",
+  "author": "zystem",
+  "timestamp": "2026-11-20T00:00:00Z",
+  "version": 1,
+  "statements": []
+}

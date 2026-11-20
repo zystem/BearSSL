@@ -15,6 +15,13 @@
 | [explanation-design.md](explanation-design.md) | explanation | why it is built this way |
 | [explanation-security-status.md](explanation-security-status.md) | explanation | what is and is not known about its safety |
 | [testing.md](testing.md) | record | what was run, on what, when; what was not |
+| [building.md](building.md) | how-to and reference | build, and where the dependencies come from |
+| [architecture.md](architecture.md) | explanation | actors and actions in the system |
+| [threat-model.md](threat-model.md) | explanation | what is protected, against whom, what is not covered |
+| [security-policies.md](security-policies.md) | reference | thresholds for findings, analysis, secrets |
+| [releasing.md](releasing.md) | how-to | for the maintainer: making a release |
+| [verifying-releases.md](verifying-releases.md) | how-to | for the user: checking a release |
+| [../CONTRIBUTING.md](../CONTRIBUTING.md), [../GOVERNANCE.md](../GOVERNANCE.md), [../SECURITY.md](../SECURITY.md), [../CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md), [../DCO.md](../DCO.md) | project | how the project is run and how to take part |
 | [../CHANGELOG.md](../CHANGELOG.md) | record | changes against upstream |
 | [../TLS13-PLAN.md](../TLS13-PLAN.md) | record | the plan and the notes of each step |
 | [../contrib/nim/README.md](../contrib/nim/README.md) | how-to | use from Nim (nim-grpc, CiNim) |

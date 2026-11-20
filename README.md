@@ -73,7 +73,6 @@ build/brssl server -p 4433 -cert /tmp/tls13-tryit/cert.pem -key /tmp/tls13-tryit
 ```text
 binding to: ::
 bound.
-accepting connection from: ::ffff:127.0.0.1
 Handshake completed
    version:               TLS 1.3
    cipher suite:          TLS13_AES_128_GCM_SHA256
@@ -91,7 +90,6 @@ echo hello | build/brssl client localhost:4433 -CA /tmp/tls13-tryit/cert.pem -vm
 ```
 
 ```text
-connecting to: 127.0.0.1
 connected.
 Handshake completed
    version:               TLS 1.3
@@ -101,6 +99,8 @@ Handshake completed
 stdin closed...
 SSL closed normally
 ```
+
+The tools also print lines that name the address (`connecting to: ...`, `accepting connection from: ...`); they depend on whether `localhost` resolves to 127.0.0.1 or to ::1 on your machine, so they are not shown above.
 
 The server prints `hello`: it received it over TLS 1.3. Without `-vmax TLS-1.3` both tools stop at TLS 1.2, as upstream does: TLS 1.3 is something a program asks for.
 
@@ -140,7 +140,7 @@ Rebuilding the handshake from the `.t0` files (`make T0`) needs Mono; changing t
 | fix a problem | [Troubleshooting](docs/troubleshooting.md), [FAQ](docs/faq.md) |
 | run it in production | [Production checklist](docs/production-checklist.md) |
 | use it from Nim | [contrib/nim](contrib/nim/README.md) |
-| contribute or check the work | [What was run](docs/testing.md), [TLS13-PLAN.md](TLS13-PLAN.md) (the plan and its records), [Changelog](CHANGELOG.md) |
+| contribute or check the work | [Contributing](CONTRIBUTING.md), [Governance](GOVERNANCE.md), [Security policy](SECURITY.md), [Building](docs/building.md), [Architecture](docs/architecture.md), [Threat model](docs/threat-model.md), [What was run](docs/testing.md), [TLS13-PLAN.md](TLS13-PLAN.md) (the plan and its records), [Changelog](CHANGELOG.md) |
 
 The whole list, with the kind of each page, is in [docs/README.md](docs/README.md).
 

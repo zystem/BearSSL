@@ -15,7 +15,6 @@ build/brssl server -p 4450 -cert /tmp/tls13-tryit/cert.pem -key /tmp/tls13-tryit
 ```
 
 ```text
-accepting connection from: ::ffff:127.0.0.1
 Handshake completed
    version:               TLS 1.3
 hi
