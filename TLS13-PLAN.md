@@ -71,6 +71,32 @@ Notes found while reading the code (2026-11-18):
 - The suite table in `ssl_hs_common.t0` has no 1.3 entries; `suite-supported?` rejects them now.
 - Careful: a Python `str.replace` that does not match is silent; one engine edit was lost that way and showed up only as a 1.2 interop failure. Check each edit with `git diff`.
 
+## Size and speed (measured 2026-11-20)
+
+Upstream `7bea48e` against this fork (branch `tls13-bench`), gcc 13.3, `-Os -ffunction-sections -fdata-sections`, linked with `--gc-sections`, x86-64 Linux; the machine also ran other work, so the last digit is noise.
+
+| | upstream | fork | change |
+|---|---|---|---|
+| `libbearssl.a` | 1 027 992 B | 1 075 300 B | +47 308 B |
+| `samples/client_basic`, text | 116 625 B | 130 859 B | +14 234 B (+12.2 %) |
+| `samples/server_basic`, text | 111 839 B | 125 647 B | +13 808 B (+12.3 %) |
+| `samples/client_basic`, stripped file | 129 232 B | 141 520 B | +12 288 B |
+| `samples/server_basic`, stripped file | 121 040 B | 137 424 B | +16 384 B |
+
+The TLS 1.3 code is linked whether or not a program enables it (there is no compile switch yet); it includes the RSA-PSS verifier and signer that `set_default_rsavrfy` and `set_single_rsa` now install. Handshake CPU time (`test/bench_handshake.c`: client and server engine in one process, ECDSA P-256 server key, the client validates the certificate with the X.509 engine, 1000 handshakes, default EC implementation, AES-NI):
+
+| | client | server | total |
+|---|---|---|---|
+| TLS 1.2 ECDHE-ECDSA AES-128-GCM, upstream | 0.754 ms | 0.565 ms | 1.334 ms |
+| TLS 1.2 ECDHE-ECDSA AES-128-GCM, fork | 0.757 ms | 0.565 ms | 1.334 ms |
+| TLS 1.2, client authentication (fork / upstream) | 0.93 ms | 1.13 ms | 2.07 / 2.07 ms |
+| TLS 1.3 AES-128-GCM, fork | 0.736 ms | 0.339 ms | 1.086 ms |
+| TLS 1.3 AES-256-GCM, fork | 0.749 ms | 0.348 ms | 1.109 ms |
+| TLS 1.3 ChaCha20-Poly1305, fork | 0.737 ms | 0.339 ms | 1.088 ms |
+| TLS 1.3, client authentication, fork | 0.920 ms | 0.901 ms | 1.833 ms |
+
+TLS 1.2 speed is unchanged; a TLS 1.3 handshake takes about 19 % less CPU than TLS 1.2 (the server about 40 % less: X25519 instead of P-256 for the key exchange, and the key schedule is a few HMAC calls). Not measured: RSA keys, other machines, record throughput, memory use (the engine context grew by about 1 KB).
+
 Rough effort (estimate, not measured): client only, steps 1-3: 6-8 weeks. Whole plan to step 8: 3-5 months.
 
 ## Risks
