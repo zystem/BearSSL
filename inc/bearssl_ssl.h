@@ -4499,6 +4499,15 @@ int br_sslio_close(br_sslio_context *cc);
 #define BR_TLS_DHE_PSK_WITH_CHACHA20_POLY1305_SHA256       0xCCAD
 #define BR_TLS_RSA_PSK_WITH_CHACHA20_POLY1305_SHA256       0xCCAE
 
+/*
+ * TLS 1.3 cipher suites (RFC 8446, appendix B.4). They are used only with
+ * TLS 1.3 (BR_TLS13) and are not part of any profile: add them to the list
+ * given to br_ssl_engine_set_suites().
+ */
+#define BR_TLS13_AES_128_GCM_SHA256                  0x1301
+#define BR_TLS13_AES_256_GCM_SHA384                  0x1302
+#define BR_TLS13_CHACHA20_POLY1305_SHA256            0x1303
+
 /* From RFC 7507 */
 #define BR_TLS_FALLBACK_SCSV                         0x5600
 

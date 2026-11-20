@@ -37,6 +37,9 @@
 #include <unistd.h>
 
 #include "bearssl.h"
+#ifdef WITH_TLS13
+#include "tls13.h"
+#endif
 
 /*
  * Connect to the specified host and port. The connected socket is
@@ -281,6 +284,9 @@ main(int argc, char *argv[])
 	 *    the hardcoded trust anchor.
 	 */
 	br_ssl_client_init_full(&sc, &xc, TAs, TAs_NUM);
+#ifdef WITH_TLS13
+	sample_enable_tls13(&sc.eng);
+#endif
 
 	/*
 	 * Set the I/O buffer to the provided array. We allocated a
@@ -366,6 +372,10 @@ main(int argc, char *argv[])
 
 		err = br_ssl_engine_last_error(&sc.eng);
 		if (err == 0) {
+#ifdef WITH_TLS13
+			fprintf(stderr, "version 0x%04X\n",
+				(unsigned)sc.eng.session.version);
+#endif
 			fprintf(stderr, "closed.\n");
 			return EXIT_SUCCESS;
 		} else {

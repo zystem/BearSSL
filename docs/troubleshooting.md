@@ -1,0 +1,23 @@
+# Troubleshooting by message
+
+*Kind: reference (a lookup by message).* The messages are those of `brssl` (`ERROR: SSL error N (NAME)`); a program that uses the library gets the same number from `br_ssl_engine_last_error()`. Numbers `256 + n` are an alert received from the peer, `512 + n` an alert we sent (alert numbers are in RFC 8446, section 6).
+
+The cases marked "run" were produced on 2026-11-20 with `brssl` and a self-signed certificate; the others are the usual meaning of the code and were not provoked.
+
+| Message | Meaning | What to do |
+|---|---|---|
+| `SSL error 3 (BR_ERR_UNSUPPORTED_VERSION)` | The peer chose a version below our minimum. Run: a client with `-vmin TLS-1.3` against a server with `-vmax TLS-1.2`. | Raise the peer's maximum, or lower our minimum (`-vmin`, `br_ssl_engine_set_versions()`). |
+| `SSL error 62 (BR_ERR_X509_NOT_TRUSTED)` | The server's certificate does not chain to our trust anchors. Run: `-CA` with another certificate. | Give the client the right anchor (`-CA`); for a self-signed certificate, the certificate itself. The name must also match (SNI/subject alternative name). |
+| `SSL error 29 (BR_ERR_NO_CLIENT_AUTH)` | The server required a client certificate and the client sent none. Run: server with `-CA`, client without `-cert`. | Give the client a certificate and key ([mutual TLS](howto-mutual-tls.md)), or start the server with `-anon_ok` / `BR_OPT_TOLERATE_NO_CLIENT_AUTH`. |
+| `SSL error 376 (received alert 120)` on the client, `632 (sent alert 120)` on the server | `no_application_protocol`: the server was started with `-strictalpn` and shares no name with the client. Run. | Use a name both sides know (`-alpn`), or leave `-strictalpn` off. |
+| `received alert 40` (296) | `handshake_failure`: no common suite, group or signature scheme. | Check that the server's certificate type (RSA or EC) fits the signature schemes the client offers, and that the suite lists overlap. For TLS 1.3, the server needs a policy handler with `choose13` ([reference](reference-api.md)). Not run. |
+| `received alert 70` (326) | `protocol_version`: the peer does not speak a version we offer. | Compare the versions on both sides. Not run. |
+| `received alert 51` (307) | `decrypt_error`: the peer could not check something we sent (a Finished, a signature or a PSK binder). | Take a trace (`-trace`) and compare with the peer's. If you changed the library, this is the sign of a wrong label or hash. Not run against a third-party peer; our own test produces it when the PSK is wrong. |
+| `SSL error 4 (BR_ERR_BAD_VERSION)` | A version field is not what the protocol allows; also the downgrade sentinel (`DOWNGRD`) in a TLS 1.2 ServerHello when we offered TLS 1.3. | An attacker or a middlebox rewrites the hello: do not lower the check. Not run against a real middlebox. |
+| `SSL error 10 (BR_ERR_UNEXPECTED)` | A message at the wrong time. | In your code, the record layer is used out of order; for a peer, it is a peer bug. A server that sent a ticket before the handshake was complete caused this in an early version of this fork. |
+| `SSL error 23 (BR_ERR_LIMIT_EXCEEDED)` | A message is larger than a fixed buffer (for example a HelloRetryRequest above 400 bytes: the engine keeps a copy of it in a fixed buffer). | Not run beyond the HelloRetryRequest case. The limits are listed in the [API reference](reference-api.md). |
+| `SSL error 24 (BR_ERR_BAD_FINISHED)` | The Finished message does not match: the keys or the transcript differ. | See alert 51. |
+| `SSL error 27 (BR_ERR_BAD_SIGNATURE)` | The server's CertificateVerify or key exchange signature did not verify. | Check that the certificate is the one whose key signs. |
+| Handshake works, but there is no resumption | No ticket arrived before you saved the session, the server has no cache or it was restarted, or the cache dropped the entry. | See [resumption](howto-resumption.md): `br_ssl_engine_get_session_parameters()` after the first records, and `ticket_len` is non-zero. |
+| TLS 1.3 is not used though both sides "support" it | The version maximum and the TLS 1.3 suites must both be set ([enable TLS 1.3](howto-enable-tls13.md)); `brssl` needs `-vmax TLS-1.3`. | |
+| `secure renegotiation: yes` shown by the server tool for a TLS 1.3 connection | A display detail of `brssl server`: TLS 1.3 has no renegotiation and the value is not meaningful. | Ignore it. (The client side shows `no`.) |
