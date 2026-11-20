@@ -8,7 +8,7 @@ Upstream BearSSL's tags `v0.4` to `v0.6` are upstream's. This fork's versions ar
 
 ## Before
 
-1. `master` is green (the checks of the last run on it), the 24 h fuzz result of the current handshake code is written in [testing.md](testing.md) and has no finding, no Critical or High finding with a fix is open ([security-policies.md](security-policies.md)), and nothing is open that must go in.
+1. `master` is green (the checks of the last run on it), the 24 h fuzz result of the current handshake code is written in [testing.md](testing.md) and has no finding (if it is not finished, the release notes say so), no Critical or High finding with a fix is open ([security-policies.md](security-policies.md)), and nothing is open that must go in.
 2. Read what went in since the last tag (`git log vPREV..master --oneline`).
 
 ## The release pull request
