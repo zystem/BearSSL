@@ -1,0 +1,10 @@
+# The keys and certificates in samples/ and test/ are test data made for the library's tests; they protect nothing. Everything else is scanned as by default.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "keys and certificates made for the tests and the samples"
+paths = [
+  '''samples/.*''',
+  '''test/.*''',
+]

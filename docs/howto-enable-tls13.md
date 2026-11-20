@@ -64,7 +64,6 @@ Then run the client (the server's output is empty):
 ```
 
 ```text
-connecting to: 127.0.0.1
 connected.
 version 0x0304
 closed.

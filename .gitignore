@@ -4,3 +4,6 @@
 /testcrypto
 /testspeed
 /testx509
+/T0Comp.exe
+/srv.pid
+/build-fuzz*/

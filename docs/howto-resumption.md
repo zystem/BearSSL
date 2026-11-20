@@ -9,7 +9,7 @@
 <!-- run-bg -->
 ```bash
 # in a second terminal
-build/brssl server -p 4460 -cert /tmp/tls13-tryit/cert.pem -key /tmp/tls13-tryit/key.pem -vmax TLS-1.3
+build/brssl server -p 4460 -cert /tmp/tls13-tryit/cert.pem -key /tmp/tls13-tryit/key.pem -vmax TLS-1.3 < /dev/null
 ```
 
 <!-- run -->
@@ -22,7 +22,7 @@ connection 1: TLS 1.3, suite 1301, full handshake, -1 bytes read, ticket 32 byte
 connection 2: TLS 1.3, suite 1301, RESUMED, -1 bytes read, ticket 32 bytes, error 0
 ```
 
-(`-1 bytes read`: the test sends a request that the tool does not answer; the number is not part of the test. The certificate is the one of the [README try-it](../README.md).)
+(`< /dev/null` makes the server close the connection when it has nothing more to say, so that the test program returns; `-1 bytes read`: the test sends a request that the tool does not answer, and the number is not part of the test. The certificate is the one of the [README try-it](../README.md).)
 
 ## In your client
 

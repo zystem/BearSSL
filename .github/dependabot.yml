@@ -1,0 +1,10 @@
+version: 2
+updates:
+  # the only dependencies the project has are the actions of the workflows
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
