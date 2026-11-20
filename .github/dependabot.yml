@@ -1,6 +1,6 @@
 version: 2
 updates:
-  # the only dependencies the project has are the actions of the workflows
+  # the dependencies of the project: the actions of the workflows and the Go module of the interop test program
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
@@ -8,3 +8,7 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+  - package-ecosystem: gomod
+    directory: "/test/interop_go"
+    schedule:
+      interval: weekly

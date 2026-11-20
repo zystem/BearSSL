@@ -38,6 +38,12 @@ OpenSSL 3.0.13, GnuTLS (`gnutls-cli`, `gnutls-serv`), Go 1.24 `crypto/tls`, grpc
 
 Built and run on Linux x86-64 with gcc 13 and clang 18. Not run on other platforms in this fork; upstream's portability remains the goal (the new code uses fixed-size buffers, no heap, no OS calls), but that is not tested here. Not run: 32-bit builds, big-endian, Windows, ARM, bare-metal.
 
+## Releases of this fork
+
+| Release | Based on upstream | State |
+|---|---|---|
+| `v0.6.1-tls13.0` (2026-11-20) | `7bea48e` | latest, supported ([SECURITY.md](../SECURITY.md)) |
+
 ## Upstream base
 
 Upstream BearSSL commit `7bea48e`. Fixes upstream makes later are merged by hand; there is no promise of how fast.
