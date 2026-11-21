@@ -35,13 +35,25 @@ The X.509 test vectors of `test/x509` are text (a PEM-like block with Base64; `r
 
 `sh test/style_check.sh` checks that no binary file is tracked in the repository, and tabs, trailing white space and the line length of the C files the fork added (CI step "Coding standard"); run on 2026-11-20: ok.
 
+## After the fixes of 2026-11-21
+
+Run on 2026-11-21 after the fixes in [conformance.md](conformance.md): `testcrypto all` and `testx509` also under AddressSanitizer + UndefinedBehaviorSanitizer (exit 0); both fuzz targets for 10 minutes with 4 workers each (no artifact); `sh test/interop_server13.sh`, 46 cases with OpenSSL, GnuTLS and Go; `sh test/tlsfuzzer/run.sh`.
+
 ## Sanitizers
 
 AddressSanitizer + UndefinedBehaviorSanitizer (alignment and function-type checks off; upstream loads unaligned words by design and fills its vtables with function pointer casts) on the unit tests and on the interop scripts: clean. An ASan binary built with an old libasan crashes at start now and then when `/proc/sys/vm/mmap_rnd_bits` is above 28; the runs here had it at 28 or checked it first. Alignment check: not run.
 
 ## Fuzzing
 
-libFuzzer (clang 18, ASan + UBSan), client and server engines, build flag `BR_TLS13_FUZZ` (cryptographic checks off), seeds made by running a client and a server against each other (`test/fuzz`). A 10-minute trial run of about 4.5 million executions found no crash. The seed generator found a real bug (HelloRetryRequest with `renegotiation_info`), now fixed. **24-hour runs were started on 2026-11-20 on three machines and their result is not recorded here yet.** The gate "24 h without a finding" is not met until it is.
+libFuzzer (clang 18, ASan + UBSan), client and server engines, build flag `BR_TLS13_FUZZ` (cryptographic checks off), seeds made by running a client and a server against each other (`test/fuzz`). A 10-minute trial run of about 4.5 million executions found no crash. The seed generator found a real bug (HelloRetryRequest with `renegotiation_info`), now fixed. **The 24 hour runs of 2026-11-20 and what they were** (read on 2026-11-21 16:00 from the machines; code of commit `e7a3fe6` for the first two and `f08786e` for the third, both before the fixes of [conformance.md](conformance.md)):
+
+| Machine | Target | Run | Result |
+|---|---|---|---|
+| 192.168.100.77 | server, 2 workers | finished: 86 401 s | 15 530 581 runs in one worker's log; **no artifact** |
+| 192.168.100.4 (hypervisor, `nice 19`) | client and server, 8 workers each | both finished: 86 401 s | 0 artifacts in each; the last worker of each ran 10 768 445 (client) and 9 982 862 (server) times; the eight worker logs (6.4 to 11.1 million) are shared by both targets, so a total is not stated; **no artifact** |
+| 192.168.100.85 | client, 2 workers | **stopped after about 18.8 hours**: the machine restarted (boot at 21:41 on 2026-11-20; the logs end at 19:02 and 19:08, the cause was not found) | about 10.3 and 12.5 million runs in the two workers' last lines; **no artifact**; the 24 hours were not reached |
+
+So the gate "24 h without a finding" is met for the server (two machines) and for the client on the hypervisor (code `f08786e`); the client run of the first machine is short of 24 hours. These runs are of code that is older than the fixes of 2026-11-21. A run of the fixed code (commit `0fa53ee`, both targets, 8 workers each, `nice 19`) was started on 192.168.100.4 on 2026-11-21 at 16:03 (+02:00) and ends at 16:03 on 2026-11-22; **its result is not known yet**. The fixed code was also fuzzed for 10 minutes with 4 workers each (no artifact).
 
 ## Size and speed (2026-11-20, one machine)
 
@@ -50,7 +62,7 @@ libFuzzer (clang 18, ASan + UBSan), client and server engines, build flag `BR_TL
 | `libbearssl.a` | 1 027 992 B | 1 075 300 B |
 | `client_basic` text (`-Os`, `--gc-sections`) | 116 625 B | 130 859 B (+12.2 %) |
 | `server_basic` text | 111 839 B | 125 647 B (+12.3 %) |
-| engine context | 3616 B | 5200 B |
+| engine context | 3616 B | 6024 B |
 | TLS 1.2 handshake, ECDHE-ECDSA-AES-128-GCM, 1000 runs | 1.334 ms | 1.334 ms |
 | TLS 1.3 handshake, AES-128-GCM | not available | 1.086 ms (client 0.736, server 0.339) |
 | TLS 1.2 with client authentication | 2.07 ms | 2.07 ms |

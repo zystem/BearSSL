@@ -258,6 +258,8 @@ usage_server(void)
 	fprintf(stderr,
 "   -vmax name      set maximum supported version (default: TLS-1.2)\n");
 	fprintf(stderr,
+"   -ku num         TLS 1.3: change the sending key after num records\n");
+	fprintf(stderr,
 "   -cs names       set list of supported cipher suites (comma-separated)\n");
 	fprintf(stderr,
 "   -hf names       add support for some hash functions (comma-separated)\n");
@@ -715,6 +717,7 @@ do_server(int argc, char *argv[])
 	const char *bind_name;
 	const char *port;
 	unsigned vmin, vmax;
+	size_t ku_every;
 	cipher_suite *suites;
 	size_t num_suites;
 	uint16_t *suite_ids;
@@ -745,6 +748,7 @@ do_server(int argc, char *argv[])
 	bidi = 1;
 	vmin = 0;
 	vmax = 0;
+	ku_every = 0;
 	suites = NULL;
 	num_suites = 0;
 	hfuns = 0;
@@ -912,6 +916,20 @@ do_server(int argc, char *argv[])
 				fprintf(stderr,
 					"ERROR: unrecognised version '%s'\n",
 					arg);
+				usage_server();
+				goto server_exit_error;
+			}
+		} else if (eqstr(arg, "-ku")) {
+			if (++ i >= argc) {
+				fprintf(stderr,
+					"ERROR: no argument for '-ku'\n");
+				usage_server();
+				goto server_exit_error;
+			}
+			ku_every = parse_size(argv[i]);
+			if (ku_every == (size_t)-1 || ku_every == 0) {
+				fprintf(stderr,
+					"ERROR: invalid number for '-ku'\n");
 				usage_server();
 				goto server_exit_error;
 			}
@@ -1100,6 +1118,7 @@ do_server(int argc, char *argv[])
 	suite_ids = xmalloc(num_suites * sizeof *suite_ids);
 	br_ssl_server_zero(&cc);
 	br_ssl_engine_set_versions(&cc.eng, vmin, vmax);
+	br_ssl_engine_set_tls13_key_update_interval(&cc.eng, ku_every);
 	br_ssl_engine_set_all_flags(&cc.eng, flags);
 	if (vmin <= BR_TLS11) {
 		if (!(hfuns & (1 << br_md5_ID))) {

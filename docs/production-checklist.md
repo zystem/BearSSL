@@ -9,6 +9,7 @@
 - [ ] **Private keys**: stored and backed up outside the library; BearSSL keeps a key in memory for the life of the policy handler. Wipe your own copies.
 - [ ] **Trust anchors** for clients, and for servers that ask for client certificates; there is no revocation checking (CRL or OCSP) in BearSSL: handle revocation by short certificate lifetimes or in your program.
 - [ ] **Client certificates** (if used): required or optional (`BR_OPT_TOLERATE_NO_CLIENT_AUTH`), and the program that reads the identity of the client checks it after the handshake.
+- [ ] **Resumption rules**: give the engines a clock (`br_ssl_engine_set_tls13_time()`; without it a ticket does not expire by itself) and set a policy identifier on the server (`br_ssl_server_set_tls13_policy_id()`) that you change when the client-certificate policy or the server certificate changes ([resumption](howto-resumption.md)).
 - [ ] **Session cache** (resumption): size it (`br_ssl_session_cache_lru_init()` storage; the default of `brssl` is 5000 bytes). A restart forgets all tickets; several servers do not share them; no stateless tickets.
 - [ ] **Randomness**: the engine needs a seeded PRNG (`br_ssl_engine_inject_entropy()` or the system source). As upstream, an unseeded PRNG gives `BR_ERR_NO_RANDOM`; this was not run with TLS 1.3.
 - [ ] **Network**: your program does the I/O and the time-outs; the engine has none. Set a handshake time-out.

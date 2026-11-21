@@ -578,6 +578,8 @@ usage_client(void)
 	fprintf(stderr,
 "   -vmax name      set maximum supported version (default: TLS-1.2)\n");
 	fprintf(stderr,
+"   -ku num         TLS 1.3: change the sending key after num records\n");
+	fprintf(stderr,
 "   -cs names       set list of supported cipher suites (comma-separated)\n");
 	fprintf(stderr,
 "   -hf names       add support for some hash functions (comma-separated)\n");
@@ -607,6 +609,7 @@ do_client(int argc, char *argv[])
 	const char *sni;
 	anchor_list anchors = VEC_INIT;
 	unsigned vmin, vmax;
+	size_t ku_every;
 	VECTOR(char *) alpn_names = VEC_INIT;
 	cipher_suite *suites;
 	size_t num_suites;
@@ -639,6 +642,7 @@ do_client(int argc, char *argv[])
 	bidi = 1;
 	vmin = 0;
 	vmax = 0;
+	ku_every = 0;
 	suites = NULL;
 	num_suites = 0;
 	hfuns = 0;
@@ -786,6 +790,20 @@ do_client(int argc, char *argv[])
 				fprintf(stderr,
 					"ERROR: unrecognised version '%s'\n",
 					arg);
+				usage_client();
+				goto client_exit_error;
+			}
+		} else if (eqstr(arg, "-ku")) {
+			if (++ i >= argc) {
+				fprintf(stderr,
+					"ERROR: no argument for '-ku'\n");
+				usage_client();
+				goto client_exit_error;
+			}
+			ku_every = parse_size(argv[i]);
+			if (ku_every == (size_t)-1 || ku_every == 0) {
+				fprintf(stderr,
+					"ERROR: invalid number for '-ku'\n");
 				usage_client();
 				goto client_exit_error;
 			}
@@ -985,6 +1003,7 @@ do_client(int argc, char *argv[])
 	suite_ids = xmalloc((num_suites + 1) * sizeof *suite_ids);
 	br_ssl_client_zero(&cc);
 	br_ssl_engine_set_versions(&cc.eng, vmin, vmax);
+	br_ssl_engine_set_tls13_key_update_interval(&cc.eng, ku_every);
 	dnhash = NULL;
 	for (u = 0; hash_functions[u].name; u ++) {
 		const br_hash_class *hc;

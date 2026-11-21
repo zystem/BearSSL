@@ -48,6 +48,8 @@ hmac3(const br_hash_class *dig, const void *key, size_t key_len,
 		br_hmac_update(&hc, c, c_len);
 	}
 	br_hmac_out(&hc, out);
+	br_tls13_wipe(&hc, sizeof hc);
+	br_tls13_wipe(&kc, sizeof kc);
 }
 
 /*
@@ -61,9 +63,49 @@ extract(const br_hash_class *dig, void *out,
 		NULL, 0, NULL, 0, out);
 }
 
-/* see bearssl_tls13.h */
+/* see inner.h */
 void
-br_tls13_expand_label(const br_hash_class *dig, const void *secret,
+br_tls13_wipe(void *p, size_t len)
+{
+	volatile unsigned char *q;
+
+	/*
+	 * Writes through a volatile pointer cannot be removed as dead
+	 * stores, which a plain memset() before the end of the life of an
+	 * object can be.
+	 */
+	q = p;
+	while (len -- > 0) {
+		*q ++ = 0;
+	}
+}
+
+/* see inner.h */
+size_t
+br_tls13_find_type(const unsigned char *buf, size_t len)
+{
+	size_t u, idx;
+	uint32_t found, nz, m;
+
+	/*
+	 * Index of the last non-zero byte, found with the same work and
+	 * the same memory accesses whatever the position (the padding of
+	 * a record is hidden from a timing observer).
+	 */
+	idx = 0;
+	found = 0;
+	for (u = 0; u < len; u ++) {
+		nz = ((uint32_t)buf[u] + 0xFF) >> 8;
+		m = -nz;
+		idx = (size_t)(((uint32_t)idx & ~m) | ((uint32_t)u & m));
+		found |= nz;
+	}
+	return (found != 0) ? idx : (size_t)-1;
+}
+
+/* see bearssl_tls13.h */
+int
+br_tls13_expand_label_checked(const br_hash_class *dig, const void *secret,
 	const char *label, const void *context, size_t context_len,
 	void *out, size_t out_len)
 {
@@ -73,26 +115,40 @@ br_tls13_expand_label(const br_hash_class *dig, const void *secret,
 	 *   opaque label<7..255> = "tls13 " + Label;
 	 *   opaque context<0..255>;
 	 * followed by the HKDF-Expand block counter (1): only one block is
-	 * ever needed, because out_len <= Hash.length.
+	 * ever needed, because out_len <= Hash.length. The pieces go to
+	 * the HMAC one by one, so that no copy of the label is needed.
 	 */
-	unsigned char hdr[3], lab[255], ctr, ctxlen, t[BR_TLS13_MAX_HASH_LEN];
+	unsigned char hdr[3], ctr, ctxlen, t[BR_TLS13_MAX_HASH_LEN];
 	br_hmac_key_context kc;
 	br_hmac_context hc;
-	size_t label_len;
+	size_t label_len, hlen;
 
+	if (dig == NULL || secret == NULL || label == NULL || out == NULL) {
+		return 0;
+	}
+	hlen = br_digest_size(dig);
+	if (hlen == 0 || hlen > BR_TLS13_MAX_HASH_LEN
+		|| out_len == 0 || out_len > hlen
+		|| context_len > 255
+		|| (context_len > 0 && context == NULL))
+	{
+		return 0;
+	}
 	label_len = strlen(label);
+	if (label_len > 249) {
+		return 0;
+	}
 	hdr[0] = (unsigned char)(out_len >> 8);
 	hdr[1] = (unsigned char)out_len;
 	hdr[2] = (unsigned char)(6 + label_len);
-	memcpy(lab, "tls13 ", 6);
-	memcpy(lab + 6, label, label_len);
 	ctxlen = (unsigned char)context_len;
 	ctr = 1;
 
-	br_hmac_key_init(&kc, dig, secret, br_digest_size(dig));
+	br_hmac_key_init(&kc, dig, secret, hlen);
 	br_hmac_init(&hc, &kc, 0);
 	br_hmac_update(&hc, hdr, 3);
-	br_hmac_update(&hc, lab, 6 + label_len);
+	br_hmac_update(&hc, "tls13 ", 6);
+	br_hmac_update(&hc, label, label_len);
 	br_hmac_update(&hc, &ctxlen, 1);
 	if (context_len > 0) {
 		br_hmac_update(&hc, context, context_len);
@@ -100,6 +156,25 @@ br_tls13_expand_label(const br_hash_class *dig, const void *secret,
 	br_hmac_update(&hc, &ctr, 1);
 	br_hmac_out(&hc, t);
 	memcpy(out, t, out_len);
+	br_tls13_wipe(t, sizeof t);
+	br_tls13_wipe(&hc, sizeof hc);
+	br_tls13_wipe(&kc, sizeof kc);
+	return 1;
+}
+
+/* see bearssl_tls13.h */
+void
+br_tls13_expand_label(const br_hash_class *dig, const void *secret,
+	const char *label, const void *context, size_t context_len,
+	void *out, size_t out_len)
+{
+	if (!br_tls13_expand_label_checked(dig, secret, label,
+		context, context_len, out, out_len))
+	{
+		if (out != NULL) {
+			memset(out, 0, out_len);
+		}
+	}
 }
 
 /* see bearssl_tls13.h */
@@ -157,6 +232,7 @@ br_tls13_ks_advance(br_tls13_ks_context *kc, const void *ikm, size_t ikm_len)
 
 	br_tls13_derive_secret(dig, kc->secret, "derived", empty, derived);
 	extract(dig, kc->secret, derived, ikm, ikm_len);
+	br_tls13_wipe(derived, sizeof derived);
 }
 
 /* see bearssl_tls13.h */

@@ -174,6 +174,10 @@ static struct {
 		"BR_ERR_IO",
 		"I/O error or premature close on transport stream."
 	}, {
+		BR_ERR_KEY_LIMIT,
+		"BR_ERR_KEY_LIMIT",
+		"TLS 1.3: the limit of records for one key was reached."
+	}, {
 		BR_ERR_X509_INVALID_VALUE,
 		"BR_ERR_X509_INVALID_VALUE",
 		"Invalid value in an ASN.1 structure."

@@ -89,7 +89,7 @@ static br_ssl_client_context cc;
 static br_ssl_server_context sc;
 static br_x509_minimal_context cxc, sxc;
 
-static void
+static int
 run(const char *name, unsigned suite, unsigned vmax, int mtls, int count)
 {
 	br_x509_certificate chain[1];
@@ -202,31 +202,33 @@ run(const char *name, unsigned suite, unsigned vmax, int mtls, int count)
 			printf("%-34s FAILED (client error %d, server error %d)\n",
 				name, br_ssl_engine_last_error(ce),
 				br_ssl_engine_last_error(se));
-			return;
+			return 1;
 		}
 		if (i == 0 && vmax == 0x0303 && ce->session.version != 0x0303) {
 			printf("%-34s not TLS 1.2\n", name);
-			return;
+			return 1;
 		}
 	}
 	t_total = now() - t_total;
 	printf("%-34s client %6.3f ms  server %6.3f ms  total %6.3f ms per handshake\n",
 		name, tc * 1000 / count, ts * 1000 / count, t_total * 1000 / count);
+	return 0;
 }
 
 int
 main(int argc, char **argv)
 {
 	int count = argc > 1 ? atoi(argv[1]) : 1000;
+	int failed = 0;
 
-	run("TLS 1.2 ECDHE-ECDSA AES-128-GCM", 0xC02B, 0x0303, 0, count);
-	run("TLS 1.2 ECDHE-ECDSA ChaCha20", 0xCCA9, 0x0303, 0, count);
-	run("TLS 1.2, client authentication", 0xC02B, 0x0303, 1, count);
+	failed |= run("TLS 1.2 ECDHE-ECDSA AES-128-GCM", 0xC02B, 0x0303, 0, count);
+	failed |= run("TLS 1.2 ECDHE-ECDSA ChaCha20", 0xCCA9, 0x0303, 0, count);
+	failed |= run("TLS 1.2, client authentication", 0xC02B, 0x0303, 1, count);
 #ifdef BR_TLS13
-	run("TLS 1.3 AES-128-GCM", 0x1301, BR_TLS13, 0, count);
-	run("TLS 1.3 AES-256-GCM", 0x1302, BR_TLS13, 0, count);
-	run("TLS 1.3 ChaCha20", 0x1303, BR_TLS13, 0, count);
-	run("TLS 1.3, client authentication", 0x1301, BR_TLS13, 1, count);
+	failed |= run("TLS 1.3 AES-128-GCM", 0x1301, BR_TLS13, 0, count);
+	failed |= run("TLS 1.3 AES-256-GCM", 0x1302, BR_TLS13, 0, count);
+	failed |= run("TLS 1.3 ChaCha20", 0x1303, BR_TLS13, 0, count);
+	failed |= run("TLS 1.3, client authentication", 0x1301, BR_TLS13, 1, count);
 #endif
-	return 0;
+	return failed ? 1 : 0;
 }

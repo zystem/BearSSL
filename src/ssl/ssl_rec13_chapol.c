@@ -91,7 +91,8 @@ static int
 chapol13_check_length(const br_sslrec13_chapol_context *cc, size_t rlen)
 {
 	(void)cc;
-	return rlen >= 17 && rlen <= (16384 + 256);
+	/* inner plaintext (content, type, padding) at most 2^14 + 1, plus tag */
+	return rlen >= 17 && rlen <= (16384 + 1 + 16);
 }
 
 static unsigned char *
@@ -129,16 +130,11 @@ chapol13_decrypt(br_sslrec13_chapol_context *cc,
 	/*
 	 * Remove zero padding: the inner type is the last non-zero byte.
 	 */
-	while (len > 0 && buf[len - 1] == 0) {
-		len --;
-	}
-	if (len == 0) {
+	u = br_tls13_find_type(buf, len);
+	if (u == (size_t)-1 || u > 16384) {
 		return NULL;
 	}
-	len --;
-	if (len > 16384) {
-		return NULL;
-	}
+	len = u;
 	*inner_type = buf[len];
 	*data_len = len;
 	return buf;
