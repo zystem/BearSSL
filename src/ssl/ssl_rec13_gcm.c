@@ -120,11 +120,14 @@ gcm13_check_length(const br_sslrec13_gcm_context *cc, size_t rlen)
 {
 	/*
 	 * Overhead: 16 bytes of tag and at least 1 byte of inner type.
-	 * Maximum: 16384 bytes of content, 1 of type, 255 of padding at
-	 * most as allowed by RFC 8446 (16384 + 256), plus the tag.
+	 * Maximum: the whole inner plaintext (content, type and padding)
+	 * is at most 2^14 + 1 bytes (RFC 8446, sections 5.2 and 5.4), plus
+	 * the tag. The RFC limit of 2^14 + 256 for the record is for
+	 * ciphers with a larger overhead and does not let padding grow
+	 * the inner plaintext beyond 2^14 + 1.
 	 */
 	(void)cc;
-	return rlen >= 17 && rlen <= (16384 + 256);
+	return rlen >= 17 && rlen <= (16384 + 1 + 16);
 }
 
 static unsigned char *
@@ -170,16 +173,11 @@ gcm13_decrypt(br_sslrec13_gcm_context *cc,
 	/*
 	 * Remove zero padding: the inner type is the last non-zero byte.
 	 */
-	while (len > 0 && buf[len - 1] == 0) {
-		len --;
-	}
-	if (len == 0) {
+	u = br_tls13_find_type(buf, len);
+	if (u == (size_t)-1 || u > 16384) {
 		return NULL;
 	}
-	len --;
-	if (len > 16384) {
-		return NULL;
-	}
+	len = u;
 	*inner_type = buf[len];
 	*data_len = len;
 	return buf;

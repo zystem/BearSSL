@@ -213,6 +213,9 @@ addr-eng: tls13_creq_len
 addr-eng: tls13_creq
 addr-eng: tls13_hrr
 addr-eng: tls13_hrr_group
+addr-eng: tls13_ecdh_done
+addr-eng: tls13_cauth
+addr-eng: tls13_obf_age
 addr-eng: tls13_hrr_suite
 addr-eng: tls13_cookie_len
 addr-eng: tls13_cookie
@@ -309,6 +312,12 @@ cc: supports-rsa-sign? ( -- bool ) {
 \ Generate the key share; returns the public point length (0 on failure).
 cc: tls13-keygen ( -- len ) {
 	T0_PUSH((uint32_t)br_ssl_engine_tls13_keygen(ENG));
+}
+
+\ Server: compute and check the shared secret from the client's key share
+\ (before the ServerHello is sent); returns 0 or an error code.
+cc: tls13-srv-ecdh ( -- err ) {
+	T0_PUSH((uint32_t)br_ssl_engine_tls13_srv_ecdh(ENG));
 }
 
 \ Compute the handshake secrets from the server's key share; returns 0 or
@@ -429,6 +438,13 @@ cc: tls13-app-keys ( -- ) {
 		br_ssl_engine_fail(ENG, BR_ERR_BAD_STATE);
 		T0_CO();
 	}
+}
+
+\ Non-zero if the number of records sent with the current key has reached
+\ the point where we change it (the limits of the cipher, RFC 8446, 5.5).
+cc: tls13-ku-due ( -- bool ) {
+	T0_PUSHi(-(ENG->tls13_out
+		&& ENG->tls13_out_count >= ENG->tls13_ku_soft));
 }
 
 \ KeyUpdate for one direction (non-zero for input).
@@ -577,19 +593,7 @@ cc: flush-record ( -- ) {
 \   0x08   output buffer is ready for a new outgoing record
 \   0x10   renegotiation is requested and not to be ignored
 \ Flags 0x01, 0x02 and 0x04 are mutually exclusive.
-: wait-co ( -- state )
-	co
-	0
-	addr-action get8 dup if
-		case
-			1 of 0 do-close endof
-			2 of addr-application_data get8 1 = if
-				0x10 or
-			then endof
-		endcase
-	else
-		drop
-	then
+: input-state ( state -- state )
 	addr-close_received get8 ifnot
 		has-input? if
 			addr-record_type_in get8 case
@@ -611,6 +615,21 @@ cc: flush-record ( -- ) {
 	then
 	can-output? if 0x08 or then ;
 
+: wait-co ( -- state )
+	co
+	0
+	addr-action get8 dup if
+		case
+			1 of 0 do-close endof
+			2 of addr-application_data get8 1 = if
+				0x10 or
+			then endof
+		endcase
+	else
+		drop
+	then
+	input-state ;
+
 \ Send an alert message. This shall be called only when there is room for
 \ an outgoing record.
 : send-alert ( level alert -- )
@@ -631,6 +650,17 @@ cc: flush-record ( -- ) {
 	2 alert send-alert
 	begin can-output? not while wait-co drop repeat
 	alert 512 + fail ;
+
+\ Fail with the error 'err' after sending a fatal alert (used in TLS 1.3, where
+\ the alert is protected with the current keys); the status of the engine
+\ is 'err', not the alert (compare with fail-alert).
+: fail-with-alert ( err alert -- ! )
+	{ err alert }
+	flush-record
+	begin can-output? not while wait-co drop repeat
+	2 alert send-alert
+	begin can-output? not while wait-co drop repeat
+	err fail ;
 
 \ Perform the close operation:
 \ -- Prevent new application data from the caller.
@@ -1772,10 +1802,24 @@ cc: tls13-chain-length ( -- len ) {
 		ERR_UNEXPECTED fail
 	endcase ;
 
-\ Main loop after a TLS 1.3 handshake. There is no renegotiation.
+\ Send a KeyUpdate that changes our sending key and asks nothing of the peer.
+: send-key-update ( -- )
+	22 wait-rectype-out
+	24 write8 1 write24 0 write8
+	flush-record
+	0 tls13-key-update
+	23 wait-rectype-out ;
+
+\ Main loop after a TLS 1.3 handshake. There is no renegotiation. Before the
+\ limit of the cipher for one key, our sending key is changed.
 : main13 ( -- ! )
 	begin
 		wait-co
+		tls13-ku-due if
+			\ Records that arrived while the KeyUpdate was written are
+			\ not announced again: look at the input now.
+			send-key-update drop 0 input-state
+		then
 		dup 0x07 and case
 			0x00 of drop endof
 			0x01 of drop read-post-handshake13 endof

@@ -43,12 +43,12 @@ The code that parses bytes from the network, in order of exposure:
 
 - **No independent audit** of the TLS 1.3 code.
 - **Side channels** of the new code were reviewed by us, not measured; no timing tests.
-- **Replay of session tickets**: the server does not mark a ticket used and does not check its age. There is no 0-RTT, so replay does not reach early data.
+- **Replay of session tickets**: the server does not mark a ticket used; with a clock (`br_ssl_engine_set_tls13_time()`) it refuses a session older than 7 days, without one a ticket lives as long as the cache keeps it. There is no 0-RTT, so replay does not reach early data. A session is bound to the server's policy identifier and, for a server that asks for client certificates, to client authentication.
 - **Revocation** (CRL, OCSP): not done by BearSSL.
 - **Fault attacks, memory disclosure by the application, a compromised host**: out of scope.
-- **Wiping of secrets** after use is limited: some temporary copies are cleared (for example the session lookup), the context is not wiped when the connection ends. The application owns the context and should wipe it.
+- **Wiping of secrets** after use: the temporary copies in the TLS 1.3 code are wiped with `br_tls13_wipe()`, which the optimiser may not remove (the object code was not inspected); the context is not wiped when the connection ends. The application owns the context and should wipe it.
 - **A hostile build environment** (compiler or the Mono toolchain) is out of scope; generated handshake code is committed and checked against the T0 sources in CI.
-- The 24 h fuzz result was not final at the time of writing ([testing.md](testing.md)).
+- The 24 hour fuzz runs found nothing in code before the fixes of 2026-11-21; the run of the fixed code (started 2026-11-21 16:03) has no result yet ([testing.md](testing.md)).
 
 ## Attack surface changes
 

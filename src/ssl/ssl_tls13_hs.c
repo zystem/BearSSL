@@ -161,13 +161,68 @@ br_ssl_engine_tls13_hrr_restart(br_ssl_engine_context *cc)
 	return 0;
 }
 
+/*
+ * Compute the shared secret from the peer's encoded point (which is
+ * replaced by the result), and check it. The group must be the one of our
+ * key share. The point must be on the curve (the multiplication fails
+ * otherwise), and the shared secret of X25519 must not be all-zero (a
+ * point of small order): RFC 8446, section 7.4.2 and RFC 7748, section
+ * 6.1. Returns 0 on success.
+ */
+static int
+ecdh_shared(br_ssl_engine_context *cc, unsigned char *point,
+	size_t *xoff, size_t *xlen)
+{
+	size_t olen, u;
+	unsigned acc;
+
+	if (cc->ecdhe_curve != cc->tls13_curve
+		|| cc->ecdhe_point_len != cc->tls13_pub_len)
+	{
+		return BR_ERR_BAD_PARAM;
+	}
+	cc->iec->order(cc->tls13_curve, &olen);
+	if (!cc->iec->mul(point, cc->ecdhe_point_len,
+		cc->tls13_priv, olen, cc->tls13_curve))
+	{
+		return BR_ERR_BAD_PARAM;
+	}
+	*xoff = cc->iec->xoff(cc->tls13_curve, xlen);
+	if (cc->tls13_curve == BR_EC_curve25519) {
+		acc = 0;
+		for (u = 0; u < *xlen; u ++) {
+			acc |= point[*xoff + u];
+		}
+		if (acc == 0) {
+			return BR_ERR_BAD_PARAM;
+		}
+	}
+	return 0;
+}
+
+/* see inner.h */
+int
+br_ssl_engine_tls13_srv_ecdh(br_ssl_engine_context *cc)
+{
+	size_t xoff, xlen;
+
+	if (cc->iec == NULL) {
+		return BR_ERR_BAD_PARAM;
+	}
+	if (ecdh_shared(cc, cc->ecdhe_point, &xoff, &xlen) != 0) {
+		return BR_ERR_BAD_PARAM;
+	}
+	cc->tls13_ecdh_done = 1;
+	return 0;
+}
+
 /* see inner.h */
 int
 br_ssl_engine_tls13_hs_keys(br_ssl_engine_context *cc)
 {
 	const br_hash_class *dig;
 	int hash_id;
-	size_t hlen, olen, xoff, xlen;
+	size_t hlen, xoff, xlen;
 	unsigned char point[133], th[48];
 
 	dig = suite_hash(cc, &hash_id);
@@ -177,22 +232,23 @@ br_ssl_engine_tls13_hs_keys(br_ssl_engine_context *cc)
 	hlen = br_digest_size(dig);
 
 	/*
-	 * The server must use the group of our key share (no
-	 * HelloRetryRequest handling yet).
+	 * The peer must use the group of our key share. The server computed
+	 * the shared secret before it sent its ServerHello (in place, in
+	 * ecdhe_point, see br_ssl_engine_tls13_srv_ecdh()); the client does
+	 * it here, on a copy.
 	 */
-	if (cc->ecdhe_curve != cc->tls13_curve
-		|| cc->ecdhe_point_len != cc->tls13_pub_len)
-	{
-		return BR_ERR_BAD_PARAM;
+	if (cc->tls13_ecdh_done) {
+		memcpy(point, cc->ecdhe_point, cc->ecdhe_point_len);
+		br_tls13_wipe(cc->ecdhe_point, sizeof cc->ecdhe_point);
+		cc->tls13_ecdh_done = 0;
+		xoff = cc->iec->xoff(cc->tls13_curve, &xlen);
+	} else {
+		memcpy(point, cc->ecdhe_point, cc->ecdhe_point_len);
+		if (ecdh_shared(cc, point, &xoff, &xlen) != 0) {
+			br_tls13_wipe(point, sizeof point);
+			return BR_ERR_BAD_PARAM;
+		}
 	}
-	cc->iec->order(cc->tls13_curve, &olen);
-	memcpy(point, cc->ecdhe_point, cc->ecdhe_point_len);
-	if (!cc->iec->mul(point, cc->ecdhe_point_len,
-		cc->tls13_priv, olen, cc->tls13_curve))
-	{
-		return BR_ERR_BAD_PARAM;
-	}
-	xoff = cc->iec->xoff(cc->tls13_curve, &xlen);
 
 	/*
 	 * Transcript hash up to and including the ServerHello.
@@ -212,8 +268,8 @@ br_ssl_engine_tls13_hs_keys(br_ssl_engine_context *cc)
 	br_tls13_derive_secret(dig, cc->tls13_ks.secret,
 		"s hs traffic", th, cc->tls13_shs);
 	cc->tls13_hlen = (unsigned char)hlen;
-	memset(point, 0, sizeof point);
-	memset(cc->tls13_priv, 0, sizeof cc->tls13_priv);
+	br_tls13_wipe(point, sizeof point);
+	br_tls13_wipe(cc->tls13_priv, sizeof cc->tls13_priv);
 	return 0;
 }
 
@@ -256,7 +312,9 @@ br_ssl_engine_tls13_finished(br_ssl_engine_context *cc, int from_client)
 	br_hmac_init(&hc, &kc, 0);
 	br_hmac_update(&hc, cc->tls13_th, hlen);
 	br_hmac_out(&hc, cc->pad);
-	memset(fk, 0, sizeof fk);
+	br_tls13_wipe(fk, sizeof fk);
+	br_tls13_wipe(&hc, sizeof hc);
+	br_tls13_wipe(&kc, sizeof kc);
 	return hlen;
 }
 
@@ -352,8 +410,10 @@ br_ssl_engine_tls13_verify_cv(br_ssl_engine_context *cc,
 	switch (alg) {
 	case 0x0403: hash_id = br_sha256_ID; is_rsa = 0; curve = 23; break;
 	case 0x0503: hash_id = br_sha384_ID; is_rsa = 0; curve = 24; break;
+	case 0x0603: hash_id = br_sha512_ID; is_rsa = 0; curve = 25; break;
 	case 0x0804: hash_id = br_sha256_ID; is_rsa = 1; curve = 0; break;
 	case 0x0805: hash_id = br_sha384_ID; is_rsa = 1; curve = 0; break;
+	case 0x0806: hash_id = br_sha512_ID; is_rsa = 1; curve = 0; break;
 	default:
 		return BR_ERR_INVALID_ALGORITHM;
 	}
@@ -421,6 +481,18 @@ br_ssl_engine_tls13_key_update(br_ssl_engine_context *cc, int for_input)
 	secret = (for_input ? cc->tls13_server : !cc->tls13_server)
 		? cc->tls13_cap : cc->tls13_sap;
 	br_tls13_next_traffic_secret(dig, secret, secret);
+	if (!for_input) {
+		uint64_t soft, hard;
+		int r;
+
+		/* the limits of the cipher stay, only the count restarts */
+		soft = cc->tls13_ku_soft;
+		hard = cc->tls13_ku_hard;
+		r = br_ssl_engine_tls13_switch(cc, for_input, 1);
+		cc->tls13_ku_soft = soft;
+		cc->tls13_ku_hard = hard;
+		return r;
+	}
 	return br_ssl_engine_tls13_switch(cc, for_input, 1);
 }
 
@@ -650,6 +722,25 @@ br_ssl_client_tls13_psk_prepare(br_ssl_client_context *cc)
 		return 0;
 	}
 	hlen = br_digest_size(dig);
+	eng->tls13_obf_age = eng->session.ticket_age_add;
+	if (eng->tls13_now_set) {
+		uint32_t age;
+
+		/*
+		 * With a clock: a ticket that was received without one, or
+		 * that is older than its lifetime, is not offered; the age
+		 * that is sent is the true one (in milliseconds, plus the
+		 * "age add" of the ticket).
+		 */
+		if (!eng->session.issued_valid) {
+			return 0;
+		}
+		age = eng->tls13_now - eng->session.ticket_issued;
+		if (age >= eng->session.ticket_lifetime || age > TICKET_LIFETIME) {
+			return 0;
+		}
+		eng->tls13_obf_age = age * 1000 + eng->session.ticket_age_add;
+	}
 	memcpy(eng->tls13_psk, eng->session.master_secret, hlen);
 	eng->tls13_psk_len = (unsigned char)hlen;
 	eng->tls13_psk_suite = (uint16_t)suite;
@@ -688,9 +779,11 @@ compute_binder(br_ssl_engine_context *cc, const unsigned char *th,
 	br_hmac_init(&hm, &kc, 0);
 	br_hmac_update(&hm, th, hlen);
 	br_hmac_out(&hm, out);
-	memset(bk, 0, sizeof bk);
-	memset(fk, 0, sizeof fk);
-	memset(&ks, 0, sizeof ks);
+	br_tls13_wipe(bk, sizeof bk);
+	br_tls13_wipe(fk, sizeof fk);
+	br_tls13_wipe(&ks, sizeof ks);
+	br_tls13_wipe(&kc, sizeof kc);
+	br_tls13_wipe(&hm, sizeof hm);
 	return hlen;
 }
 
@@ -761,7 +854,11 @@ br_ssl_engine_tls13_client_nst(br_ssl_engine_context *cc,
 	sp->version = BR_TLS13;
 	sp->session_id_len = 0;
 	sp->ticket_age_add = age_add;
-	sp->ticket_lifetime = lifetime;
+	/* a ticket is never valid for more than 7 days (RFC 8446, 4.6.1) */
+	sp->ticket_lifetime = (lifetime > TICKET_LIFETIME)
+		? TICKET_LIFETIME : lifetime;
+	sp->ticket_issued = cc->tls13_now;
+	sp->issued_valid = cc->tls13_now_set;
 	cc->tls13_nst_count ++;
 	return 1;
 }
@@ -785,14 +882,33 @@ br_ssl_server_tls13_psk_lookup(br_ssl_server_context *cc)
 		|| tmp.version != BR_TLS13
 		|| tmp.cipher_suite < 0x1301 || tmp.cipher_suite > 0x1303)
 	{
+		br_tls13_wipe(&tmp, sizeof tmp);
 		return 0;
 	}
+	/*
+	 * A session is resumed only under the policy that created it, within
+	 * its lifetime (if there is a clock), and, when the server asks for
+	 * client certificates, only if the client authenticated itself with
+	 * one in that session. Otherwise the client gets a full handshake.
+	 */
+	if (tmp.policy_id != cc->tls13_policy_id
+		|| (eng->tls13_now_set
+			&& (!tmp.issued_valid
+				|| (uint32_t)(eng->tls13_now - tmp.ticket_issued)
+					> TICKET_LIFETIME))
+		|| ((cc->ta_names != NULL || cc->tas != NULL)
+			&& cc->num_tas > 0 && !tmp.cert_authed))
+	{
+		br_tls13_wipe(&tmp, sizeof tmp);
+		return 0;
+	}
+	eng->tls13_cauth = tmp.cert_authed;
 	hlen = (tmp.cipher_suite == 0x1302) ? 48 : 32;
 	memcpy(eng->tls13_psk, tmp.master_secret, hlen);
 	eng->tls13_psk_len = (unsigned char)hlen;
 	eng->tls13_psk_suite = tmp.cipher_suite;
 	eng->tls13_resumed = 1;
-	memset(&tmp, 0, sizeof tmp);
+	br_tls13_wipe(&tmp, sizeof tmp);
 	return 1;
 }
 
@@ -871,10 +987,14 @@ br_ssl_server_tls13_make_ticket(br_ssl_server_context *cc)
 	sp.session_id_len = 32;
 	sp.version = BR_TLS13;
 	sp.cipher_suite = eng->session.cipher_suite;
+	sp.ticket_issued = eng->tls13_now;
+	sp.issued_valid = eng->tls13_now_set;
+	sp.policy_id = cc->tls13_policy_id;
+	sp.cert_authed = eng->tls13_cauth;
 	br_tls13_expand_label(dig, eng->tls13_resm, "resumption",
 		&nonce, 1, sp.master_secret, hlen);
 	(*cc->cache_vtable)->save(cc->cache_vtable, cc, &sp);
-	memset(&sp, 0, sizeof sp);
+	br_tls13_wipe(&sp, sizeof sp);
 
 	/*
 	 * NewSessionTicket: lifetime, age add, nonce, ticket, no extension.

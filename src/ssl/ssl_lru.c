@@ -49,6 +49,10 @@
  *   master secret       48 bytes
  *   protocol version    2 bytes (big endian)
  *   cipher suite        2 bytes (big endian)
+ *   issued              4 bytes (big endian; TLS 1.3: time of issue)
+ *   policy              4 bytes (big endian; TLS 1.3: server policy id)
+ *   flags               4 bytes (bit 0: client authenticated with a
+ *                       certificate; bit 1: 'issued' is valid)
  *   list prev           4 bytes (big endian)
  *   list next           4 bytes (big endian)
  *   tree left child     4 bytes (big endian)
@@ -83,12 +87,15 @@
 #define MASTER_SECRET_OFF    32
 #define VERSION_OFF          80
 #define CIPHER_SUITE_OFF     82
-#define LIST_PREV_OFF        84
-#define LIST_NEXT_OFF        88
-#define TREE_LEFT_OFF        92
-#define TREE_RIGHT_OFF       96
+#define ISSUED_OFF           84
+#define POLICY_OFF           88
+#define FLAGS_OFF            92
+#define LIST_PREV_OFF        96
+#define LIST_NEXT_OFF       100
+#define TREE_LEFT_OFF       104
+#define TREE_RIGHT_OFF      108
 
-#define LRU_ENTRY_LEN       100
+#define LRU_ENTRY_LEN       112
 
 #define ADDR_NULL   ((uint32_t)-1)
 
@@ -422,6 +429,10 @@ lru_save(const br_ssl_session_cache_class **ctx,
 		params->master_secret, MASTER_SECRET_LEN);
 	br_enc16be(cc->store + x + VERSION_OFF, params->version);
 	br_enc16be(cc->store + x + CIPHER_SUITE_OFF, params->cipher_suite);
+	br_enc32be(cc->store + x + ISSUED_OFF, params->ticket_issued);
+	br_enc32be(cc->store + x + POLICY_OFF, params->policy_id);
+	br_enc32be(cc->store + x + FLAGS_OFF,
+		(params->cert_authed ? 1 : 0) | (params->issued_valid ? 2 : 0));
 }
 
 static int
@@ -458,6 +469,12 @@ lru_load(const br_ssl_session_cache_class **ctx,
 		memcpy(params->master_secret,
 			cc->store + x + MASTER_SECRET_OFF,
 			MASTER_SECRET_LEN);
+		params->ticket_issued = br_dec32be(cc->store + x + ISSUED_OFF);
+		params->policy_id = br_dec32be(cc->store + x + POLICY_OFF);
+		params->cert_authed = (br_dec32be(cc->store + x + FLAGS_OFF)
+			& 1) != 0;
+		params->issued_valid = (br_dec32be(cc->store + x + FLAGS_OFF)
+			& 2) != 0;
 		if (x != cc->head) {
 			/*
 			 * Found node is not at list head, so move

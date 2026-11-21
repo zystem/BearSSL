@@ -38,6 +38,13 @@ Give the server a session cache, as for TLS 1.2: `br_ssl_session_cache_lru_init(
 
 `br_ssl_engine_tls13_ticket_count()` tells how many tickets the server has sent on this connection.
 
+### Time, policy and client certificates
+
+- **Give the engines a clock** with `br_ssl_engine_set_tls13_time(eng, seconds)` before each `br_ssl_client_reset()` / `br_ssl_server_reset()`: seconds on a steady clock (`CLOCK_MONOTONIC` is enough for a process that does not restart; use the wall clock if saved sessions outlive it). With it the client sends the real age of the ticket and does not offer a ticket older than its lifetime, and the server does not resume a session older than 7 days. **Without it a ticket never expires on its own.**
+- **Policy identifier**: `br_ssl_server_set_tls13_policy_id(&sc, id)`. Add one to `id` whenever the trust anchors for client certificates, the need for client certificates, or the server certificate change: sessions saved earlier are then not resumed.
+- A server that asks for client certificates resumes only a session in which the client had used one; any other client gets a full handshake and is asked for its certificate. A session created without client authentication is never turned into an authenticated one by resumption.
+- The entries of the LRU cache are 112 bytes (`br_ssl_session_cache_lru_init()` storage size divided by 112 is the number of sessions).
+
 ## Limits
 
 - Only `psk_dhe_ke` (a fresh key exchange each time) is supported. A client that offers only `psk_ke` gets a full handshake.

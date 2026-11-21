@@ -384,7 +384,7 @@ addr-ctx: hash_id
 	supports-rsa-sign? if num + then
 	supports-ecdsa? if num + then
 	1 <<
-	tls13-offered? supports-rsa-pss? and if 4 + then
+	tls13-offered? supports-rsa-pss? and if 6 + then
 	dup if 6 + then ;
 
 \ Length of Supported Versions extension: TLS 1.3, then each version from
@@ -633,6 +633,7 @@ cc: ext-ALPN-length ( -- len ) {
 			tls13-offered? supports-rsa-pss? and if
 				0x0804 write16
 				0x0805 write16
+				0x0806 write16
 			then
 		then
 		\ TODO: add an API to specify preference order for curves.
@@ -708,7 +709,7 @@ cc: ext-ALPN-length ( -- len ) {
 			addr-ticket_len get16 6 + write16
 			addr-ticket_len get16 write16
 			addr-ticket addr-ticket_len get16 write-blob
-			addr-ticket_age_add get32 dup 16 u>> write16
+			addr-tls13_obf_age get32 dup 16 u>> write16
 			0xFFFF and write16
 			tls13-binder
 			dup 1+ write16

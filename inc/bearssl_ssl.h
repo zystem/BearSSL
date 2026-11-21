@@ -218,6 +218,11 @@ extern "C" {
     I/O API ("br_sslio_*"). */
 #define BR_ERR_IO                     31
 
+/** \brief SSL status: TLS 1.3, the engine sent as many records with the
+    same key as the limit of the cipher allows and could not change the key
+    (see `br_ssl_engine_tls13_key_limit()`). */
+#define BR_ERR_KEY_LIMIT              32
+
 /** \brief SSL status: base value for a received fatal alert.
 
     When a fatal alert is received from the peer, the alert value
@@ -846,6 +851,26 @@ typedef struct {
 	uint32_t ticket_lifetime;
 	/** \brief TLS 1.3: the ticket. */
 	unsigned char ticket[BR_TLS13_MAX_TICKET];
+	/**
+	 * \brief TLS 1.3: the time (in seconds, on the clock that the
+	 * application gave with `br_ssl_engine_set_tls13_time()`) at which
+	 * the ticket was issued (server) or received (client); 0 if there
+	 * was no clock.
+	 */
+	uint32_t ticket_issued;
+	/**
+	 * \brief TLS 1.3, server: the policy identifier that was set (see
+	 * `br_ssl_server_set_tls13_policy_id()`) when the session was
+	 * created.
+	 */
+	uint32_t policy_id;
+	/**
+	 * \brief TLS 1.3, server: non-zero if the client authenticated itself
+	 * with a certificate in the handshake that created the session.
+	 */
+	unsigned char cert_authed;
+	/** \brief TLS 1.3: non-zero if `ticket_issued` is valid (a clock was set). */
+	unsigned char issued_valid;
 } br_ssl_session_parameters;
 
 #ifndef BR_DOXYGEN_IGNORE
@@ -1099,6 +1124,30 @@ typedef struct {
 	unsigned char tls13_authed;
 	unsigned char tls13_nst_count;
 
+	/*
+	 * Clock for tickets (set by the application): the current time in
+	 * seconds on any steady clock (only differences are used, modulo
+	 * 2^32); 'tls13_now_set' is non-zero if the application gave it.
+	 * 'tls13_obf_age' is the obfuscated ticket age that a client sends,
+	 * 'tls13_cauth' tells (server) whether the client was authenticated
+	 * with a certificate in this handshake, or in the handshake that
+	 * created the session that it resumes.
+	 */
+	uint32_t tls13_now;
+	unsigned char tls13_now_set;
+	uint32_t tls13_obf_age;
+	unsigned char tls13_cauth;
+
+	/*
+	 * TLS 1.3 records sent with the current key; the number after which
+	 * the engine sends a KeyUpdate, and the number at which it stops
+	 * (the limits of the AEAD, RFC 8446 section 5.5).
+	 */
+	uint64_t tls13_out_count;
+	uint64_t tls13_ku_soft;
+	uint64_t tls13_ku_hard;
+	uint64_t tls13_ku_every;
+
 	/* Request context of a TLS 1.3 CertificateRequest (to be echoed). */
 	unsigned char tls13_server;
 	unsigned char tls13_initial;
@@ -1115,6 +1164,7 @@ typedef struct {
 	 */
 	unsigned char tls13_hrr;
 	unsigned char tls13_hrr_group;
+	unsigned char tls13_ecdh_done;
 	uint16_t tls13_hrr_suite;
 	unsigned char tls13_cookie_len;
 	unsigned char tls13_cookie[255];
@@ -2097,6 +2147,59 @@ br_ssl_engine_tls13_resumed(const br_ssl_engine_context *cc)
  * \param cc   SSL engine context.
  * \return  the number of tickets.
  */
+/**
+ * \brief Give the engine the current time, for the lifetime of TLS 1.3
+ * tickets.
+ *
+ * `seconds` is the current time on a steady clock, in seconds; only the
+ * differences between two values matter (they are computed modulo 2^32),
+ * so the origin does not matter, but the clock must keep running while
+ * the program does not (use the wall clock or a clock that is kept across
+ * restarts if the cache or the saved session outlives the process).
+ * Call it before each handshake (`br_ssl_client_reset()`,
+ * `br_ssl_server_reset()`), as often as you like.
+ *
+ * With a clock: a client does not offer a ticket that is older than its
+ * lifetime (at most 7 days, RFC 8446 section 4.6.1) and sends the true
+ * age of the ticket; a server stamps the sessions that it saves and does
+ * not resume one that is older than 7 days. Without a clock (the
+ * default) a ticket never expires on its own: it lasts until the server's
+ * cache drops it, and the client sends an age of 0.
+ *
+ * \param cc        engine context.
+ * \param seconds   current time, in seconds.
+ */
+static inline void
+br_ssl_engine_set_tls13_time(br_ssl_engine_context *cc, uint32_t seconds)
+{
+	cc->tls13_now = seconds;
+	cc->tls13_now_set = 1;
+}
+
+/**
+ * \brief Change the TLS 1.3 sending key after a number of records.
+ *
+ * A TLS 1.3 engine already sends a KeyUpdate before the limit of its
+ * cipher for one key (RFC 8446 section 5.5: after 2^24 records with
+ * AES-GCM; with ChaCha20-Poly1305 after 2^32). With this function it does
+ * so earlier: after `records` records sent with the same key (any
+ * application data or handshake record counts as one). A value of 0 (the
+ * default), or one that is above the limit of the cipher, keeps the
+ * limit of the cipher. The KeyUpdate changes the engine's own sending
+ * key and does not ask the peer to change its key. Call it before the
+ * handshake (`br_ssl_client_reset()`, `br_ssl_server_reset()`); it is
+ * not reset by them.
+ *
+ * \param cc        engine context.
+ * \param records   number of records, or 0.
+ */
+static inline void
+br_ssl_engine_set_tls13_key_update_interval(br_ssl_engine_context *cc,
+	uint64_t records)
+{
+	cc->tls13_ku_every = records;
+}
+
 static inline unsigned
 br_ssl_engine_tls13_ticket_count(const br_ssl_engine_context *cc)
 {
@@ -3581,7 +3684,7 @@ struct br_ssl_session_cache_class_ {
  * \brief Context for a basic cache system.
  *
  * The system stores session parameters in a buffer provided at
- * initialisation time. Each entry uses exactly 100 bytes, and
+ * initialisation time. Each entry uses exactly 112 bytes, and
  * buffer sizes up to 4294967295 bytes are supported.
  *
  * Entries are evicted with a LRU (Least Recently Used) policy. A
@@ -3609,7 +3712,7 @@ typedef struct {
  *
  * The provided storage space must remain valid as long as the cache
  * is used. Arbitrary lengths are supported, up to 4294967295 bytes;
- * each entry uses up exactly 100 bytes.
+ * each entry uses up exactly 112 bytes.
  *
  * \param cc          session cache context.
  * \param store       storage space for cached entries.
@@ -3655,6 +3758,11 @@ struct br_ssl_server_context_ {
 	 * Session cache.
 	 */
 	const br_ssl_session_cache_class **cache_vtable;
+
+	/*
+	 * TLS 1.3: policy identifier stored with the saved sessions.
+	 */
+	uint32_t tls13_policy_id;
 
 	/*
 	 * Translated cipher suites supported by the client. The list
@@ -4144,6 +4252,31 @@ br_ssl_server_set_cache(br_ssl_server_context *cc,
 	const br_ssl_session_cache_class **vtable)
 {
 	cc->cache_vtable = vtable;
+}
+
+/**
+ * \brief Set the policy identifier of a server (TLS 1.3 resumption).
+ *
+ * The identifier is stored with each session that the server saves in its
+ * cache, and a session is resumed only if the identifier is the same as the
+ * one the server has at that moment. Change it (for example, add one)
+ * whenever something changes that decides who may connect or what a client
+ * proves: the trust anchors for client certificates, whether client
+ * authentication is required, the server certificate or name. Sessions
+ * saved before the change are then not resumed (the client gets a full
+ * handshake). The default is 0.
+ *
+ * Independently of this value, a session of a client that did not
+ * authenticate itself with a certificate is not resumed by a server that
+ * asks for client certificates: the client is made to authenticate.
+ *
+ * \param cc    server context.
+ * \param id    policy identifier.
+ */
+static inline void
+br_ssl_server_set_tls13_policy_id(br_ssl_server_context *cc, uint32_t id)
+{
+	cc->tls13_policy_id = id;
 }
 
 /**

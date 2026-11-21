@@ -785,6 +785,15 @@ cc: tls13-srv-make-ticket ( -- len ) {
 	close-elt
 	close-elt ;
 
+\ Length of the key share of a group (the encoded point, or the u coordinate),
+\ 0 for a group that we do not know.
+: keyshare-len ( group -- len )
+	dup 23 = if drop 65 ret then
+	dup 24 = if drop 97 ret then
+	dup 25 = if drop 133 ret then
+	29 = if 32 ret then
+	0 ;
+
 \ Read the key_share extension of the ClientHello. The first share whose
 \ group we support is kept (as the ECDHE curve and point); the others are
 \ skipped.
@@ -796,10 +805,11 @@ cc: tls13-srv-make-ticket ( -- len ) {
 		read16 { klen }
 		addr-ecdhe_point_len get8 0=
 		group 32 < and
-		klen 133 <= and
-		klen 0<> and
 		if
 			1 group << supported-curves and if
+				\ A share of a group that we support has exactly the
+				\ length of that group's encoding.
+				klen group keyshare-len <> if 47 fail-alert then
 				group addr-ecdhe_curve set8
 				klen addr-ecdhe_point_len set8
 				addr-ecdhe_point klen read-blob
@@ -866,6 +876,8 @@ cc: tls13-srv-make-ticket ( -- len ) {
 	read-handshake-header 1 = ifnot ERR_UNEXPECTED fail then
 	0 addr-tls13_neg set8
 	0 addr-ecdhe_point_len set8
+	0 addr-tls13_ecdh_done set8
+	0 addr-tls13_cauth set8
 	0 addr-tls13_resumed set8
 	0 addr-tls13_binder_len set8
 
@@ -1802,7 +1814,7 @@ cc: verify-CV-sig ( sig-len -- err ) {
 \ transcript must have been taken before the message.
 : read-CertificateVerify13c ( ktu -- )
 	0x20 and ifnot ERR_WRONG_KEY_USAGE fail then
-	read-handshake-header 15 = ifnot ERR_UNEXPECTED fail then
+	read-handshake-header 15 = ifnot ERR_UNEXPECTED 10 fail-with-alert then
 	read16 { alg }
 	read16 { siglen }
 	siglen 512 > if ERR_LIMIT_EXCEEDED fail then
@@ -1818,6 +1830,14 @@ cc: verify-CV-sig ( sig-len -- err ) {
 	1 addr-tls13_hrr set8
 	write-HelloRetryRequest
 	flush-record
+	\ The compatibility ChangeCipherSpec follows the first message of the
+	\ server, here the HelloRetryRequest (RFC 8446, appendix D.4).
+	addr-session_id_len get8 if
+		20 wait-rectype-out
+		1 write8
+		flush-record
+		22 wait-rectype-out
+	then
 	\ The second ClientHello is read as the first one (a client may send
 	\ the renegotiation_info extension again).
 	0 addr-reneg set8
@@ -1834,9 +1854,12 @@ cc: verify-CV-sig ( sig-len -- err ) {
 	\ ChangeCipherSpec for compatibility if the client sent a session ID.
 	addr-ecdhe_curve get8 tls13-keygen-group
 	ifnot 40 fail-alert then
+	\ The client's share must be a valid point (and not a point of small
+	\ order for X25519): illegal_parameter, before anything is sent.
+	tls13-srv-ecdh if 47 fail-alert then
 	write-ServerHello13
 	flush-record
-	addr-session_id_len get8 if
+	addr-session_id_len get8 addr-tls13_hrr get8 0= and if
 		20 wait-rectype-out
 		1 write8
 		flush-record
@@ -1866,7 +1889,7 @@ cc: verify-CV-sig ( sig-len -- err ) {
 
 	\ The client flight: certificate and verification, if requested.
 	addr-tls13_resumed get8 2 = 0= ta-names-total-length and if
-		read-handshake-header 11 = ifnot ERR_UNEXPECTED fail then
+		read-handshake-header 11 = ifnot ERR_UNEXPECTED 10 fail-with-alert then
 		read-Certificate13c
 		dup 0< if
 			\ Invalid certificate chain: tolerated only if client
@@ -1874,7 +1897,7 @@ cc: verify-CV-sig ( sig-len -- err ) {
 			\ then skipped.
 			2 flag? ifnot neg fail then
 			drop
-			read-handshake-header 15 = ifnot ERR_UNEXPECTED fail then
+			read-handshake-header 15 = ifnot ERR_UNEXPECTED 10 fail-with-alert then
 			dup skip-blob drop
 		else
 			dup 0= if
@@ -1885,17 +1908,18 @@ cc: verify-CV-sig ( sig-len -- err ) {
 				tls13-snapshot
 				read-CertificateVerify13c
 				1 addr-tls13_authed set8
+				1 addr-tls13_cauth set8
 			then
 		then
 	then
 
 	\ Client Finished.
 	tls13-snapshot
-	read-handshake-header 20 = ifnot ERR_UNEXPECTED fail then
-	dup tls13-hlen <> if ERR_BAD_FINISHED fail then
+	read-handshake-header 20 = ifnot ERR_UNEXPECTED 10 fail-with-alert then
+	dup tls13-hlen <> if ERR_BAD_FINISHED 50 fail-with-alert then
 	addr-pad 256 + tls13-hlen read-blob
 	close-elt
-	tls13-check-finished-client ifnot ERR_BAD_FINISHED fail then
+	tls13-check-finished-client ifnot ERR_BAD_FINISHED 51 fail-with-alert then
 	1 1 tls13-switch
 
 	\ The resumption master secret (the transcript up to the client
