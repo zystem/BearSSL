@@ -18,7 +18,14 @@ Changes against upstream BearSSL `7bea48e`. Dates 2026. Versions are `X.Y.Z-tls1
 - A server that asks for client certificates no longer resumes a session of a client that did not use one.
 
 ### Added (tests)
-- `test/tlsfuzzer/run.sh` and the CI job `tlsfuzzer`: scripts of tlsfuzzer against the TLS 1.3 server.
+- `test/tlsfuzzer/run.sh` and the CI job `tlsfuzzer`: scripts of tlsfuzzer against the TLS 1.3 server; the CI job `portability` (aarch64, macOS arm64, x86 32 bit, s390x big-endian in an emulator).
+
+### Changed (tests)
+- The X.509 test vectors in `test/x509` are text (a PEM-like block with Base64) instead of binary DER; `test/test_x509.c` decodes them and the test output is identical. No binary file is tracked any more; `test/style_check.sh` fails if one is.
+
+### Added (project)
+- `test/coverage.sh` and the CI job `coverage` (line coverage of `src/`, floor 80 %); `test/style_check.sh`; `docs/roadmap.md`, `docs/assurance-case.md`, `docs/upgrading.md`.
+- Release tags are signed from the next release on ([docs/verifying-releases.md](docs/verifying-releases.md)).
 
 ## 0.6.1-tls13.0 — 2026-11-20
 

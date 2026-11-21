@@ -21,5 +21,12 @@ for f in $FILES; do
 		echo "$f: line longer than 100 columns"; fail=1
 	fi
 done
+# no binary file in git (reviewable text only; build/.do_not_remove is empty)
+for f in $(git ls-files); do
+	[ -s "$f" ] || continue
+	if ! git grep -Iq . -- "$f"; then
+		echo "$f: binary file tracked"; fail=1
+	fi
+done
 [ $fail -eq 0 ] && echo "style: ok"
 exit $fail

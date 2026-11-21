@@ -48,7 +48,7 @@ The code that parses bytes from the network, in order of exposure:
 - **Fault attacks, memory disclosure by the application, a compromised host**: out of scope.
 - **Wiping of secrets** after use: the temporary copies in the TLS 1.3 code are wiped with `br_tls13_wipe()`, which the optimiser may not remove (the object code was not inspected); the context is not wiped when the connection ends. The application owns the context and should wipe it.
 - **A hostile build environment** (compiler or the Mono toolchain) is out of scope; generated handshake code is committed and checked against the T0 sources in CI.
-- The 24 h fuzz result was not final at the time of writing ([testing.md](testing.md)).
+- The 24 hour fuzz runs found nothing in code before the fixes of 2026-11-21; the run of the fixed code (started 2026-11-21 16:03) has no result yet ([testing.md](testing.md)).
 
 ## Attack surface changes
 

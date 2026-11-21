@@ -31,7 +31,9 @@ grpc-go v1.75.1 and nim-grpc, over TLS and mutual TLS: 21 cases (grpc-go client 
 
 `sh test/coverage.sh` builds with `--coverage`, runs `testcrypto all`, `testx509` and `test/interop_openssl13.sh`, and adds up the lines of `src/` that gcov reports (the CI job `coverage` fails below 80 %). Run by hand on 2026-11-20 (gcc 13, Linux x86-64, 3 min 37 s): 17798 of 20409 lines, **87.2 %**. This is line coverage of the whole of `src/`, upstream's code included; the files with no coverage are the ones nothing here uses (for example PEM encoding, CBC and CCM records, the RSA single-key handlers). Branch coverage was not measured. The interoperability script with GnuTLS and Go (`test/interop_server13.sh`) is not part of this number.
 
-`sh test/style_check.sh` checks tabs, trailing white space and the line length of the C files the fork added (CI step "Coding standard"); run on 2026-11-20: ok.
+The X.509 test vectors of `test/x509` are text (a PEM-like block with Base64; `read_file` in `test/test_x509.c` decodes them); `build/testx509` printed the same 55 lines with the text vectors as with the binary ones (checked 2026-11-20).
+
+`sh test/style_check.sh` checks that no binary file is tracked in the repository, and tabs, trailing white space and the line length of the C files the fork added (CI step "Coding standard"); run on 2026-11-20: ok.
 
 ## After the fixes of 2026-11-21
 
@@ -43,7 +45,15 @@ AddressSanitizer + UndefinedBehaviorSanitizer (alignment and function-type check
 
 ## Fuzzing
 
-libFuzzer (clang 18, ASan + UBSan), client and server engines, build flag `BR_TLS13_FUZZ` (cryptographic checks off), seeds made by running a client and a server against each other (`test/fuzz`). A 10-minute trial run of about 4.5 million executions found no crash. The seed generator found a real bug (HelloRetryRequest with `renegotiation_info`), now fixed. **24-hour runs were started on 2026-11-20 on three machines and their result is not recorded here yet.** The gate "24 h without a finding" is not met until it is.
+libFuzzer (clang 18, ASan + UBSan), client and server engines, build flag `BR_TLS13_FUZZ` (cryptographic checks off), seeds made by running a client and a server against each other (`test/fuzz`). A 10-minute trial run of about 4.5 million executions found no crash. The seed generator found a real bug (HelloRetryRequest with `renegotiation_info`), now fixed. **The 24 hour runs of 2026-11-20 and what they were** (read on 2026-11-21 16:00 from the machines; code of commit `e7a3fe6` for the first two and `f08786e` for the third, both before the fixes of [conformance.md](conformance.md)):
+
+| Machine | Target | Run | Result |
+|---|---|---|---|
+| 192.168.100.77 | server, 2 workers | finished: 86 401 s | 15 530 581 runs in one worker's log; **no artifact** |
+| 192.168.100.4 (hypervisor, `nice 19`) | client and server, 8 workers each | both finished: 86 401 s | 0 artifacts in each; the last worker of each ran 10 768 445 (client) and 9 982 862 (server) times; the eight worker logs (6.4 to 11.1 million) are shared by both targets, so a total is not stated; **no artifact** |
+| 192.168.100.85 | client, 2 workers | **stopped after about 18.8 hours**: the machine restarted (boot at 21:41 on 2026-11-20; the logs end at 19:02 and 19:08, the cause was not found) | about 10.3 and 12.5 million runs in the two workers' last lines; **no artifact**; the 24 hours were not reached |
+
+So the gate "24 h without a finding" is met for the server (two machines) and for the client on the hypervisor (code `f08786e`); the client run of the first machine is short of 24 hours. These runs are of code that is older than the fixes of 2026-11-21. A run of the fixed code (commit `0fa53ee`, both targets, 8 workers each, `nice 19`) was started on 192.168.100.4 on 2026-11-21 at 16:03 (+02:00) and ends at 16:03 on 2026-11-22; **its result is not known yet**. The fixed code was also fuzzed for 10 minutes with 4 workers each (no artifact).
 
 ## Size and speed (2026-11-20, one machine)
 
