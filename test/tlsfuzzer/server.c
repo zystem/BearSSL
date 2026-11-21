@@ -43,6 +43,7 @@
 
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/select.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -442,6 +443,32 @@ main(int argc, char *argv[])
 			fprintf(stderr, "SSL closed (correctly).\n");
 		} else {
 			fprintf(stderr, "SSL error: %d\n", err);
+		}
+		/*
+		 * Close the sending side and read what the peer still sends
+		 * (for a while): closing a socket that has unread data makes
+		 * the system send a reset, which can destroy the alert that we
+		 * just sent before the peer has read it.
+		 */
+		shutdown(cfd, SHUT_WR);
+		{
+			unsigned char junk[4096];
+			int k;
+
+			for (k = 0; k < 50; k ++) {
+				fd_set fds;
+				struct timeval tv;
+
+				FD_ZERO(&fds);
+				FD_SET(cfd, &fds);
+				tv.tv_sec = 0;
+				tv.tv_usec = 100000;
+				if (select(cfd + 1, &fds, NULL, NULL, &tv) <= 0
+					|| read(cfd, junk, sizeof junk) <= 0)
+				{
+					break;
+				}
+			}
 		}
 		close(cfd);
 		exit(0);

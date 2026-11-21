@@ -54,6 +54,7 @@ run() { # script, extra arguments
 		>"$W/$n.out" 2>&1 )
 	rc=$?
 	echo "$n rc=$rc $(grep -E '^(TOTAL|PASS|FAIL):' "$W/$n.out" | tr '\n' ' ')"
+	[ $rc -eq 0 ] || sed -n '/^FAILED/,$p' "$W/$n.out" | head -12
 	return $rc
 }
 
