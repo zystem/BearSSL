@@ -4,6 +4,12 @@ Changes against upstream BearSSL `7bea48e`. Dates 2026. Versions are `X.Y.Z-tls1
 
 ## Unreleased
 
+### Fixed (2026-11-22, the rest of the review of 2026-11-21: [docs/conformance.md](docs/conformance.md))
+- The TLS 1.3 secrets are wiped: the handshake secrets, the master secret, the PSK and the key exchange values when the handshake is over, all secrets and the record keys when the engine fails or is closed.
+
+### Added (tests)
+- `TLS13_WIPE`, `TLS13_TAMPER` (a production build refuses a changed record, a wrong Finished, a signature that does not verify); coverage of the TLS 1.3 C files with floors in CI; `test/bench_resources.c` (memory and speed; printed by the CI job `portability`).
+
 ### Fixed (2026-11-21, found with tlsfuzzer and the issue trackers of other TLS projects: [docs/conformance.md](docs/conformance.md))
 - The server accepted an X25519 key share of small order (all-zero shared secret) and, late, a key share with an invalid point or a wrong length. It now computes and checks the shared secret before its ServerHello and answers `illegal_parameter`; the client checks the zero X25519 secret too.
 - After a HelloRetryRequest the server sent its compatibility ChangeCipherSpec after the ServerHello; it follows the HelloRetryRequest now (RFC 8446 appendix D.4).

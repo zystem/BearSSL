@@ -2330,6 +2330,13 @@ int br_ssl_engine_tls13_srv_ecdh(br_ssl_engine_context *cc);
 void br_tls13_wipe(void *p, size_t len);
 
 /*
+ * Wipe all the TLS 1.3 secrets of an engine (the key schedule, the traffic
+ * secrets, the resumption secret, the PSK, the key exchange values and the
+ * keys of the record codecs). Called when the engine fails or is closed.
+ */
+void br_ssl_engine_tls13_wipe(br_ssl_engine_context *cc);
+
+/*
  * In the plaintext of a TLS 1.3 record (content, inner type, zero padding),
  * the index of the inner type: the last non-zero byte; (size_t)-1 if all
  * bytes are zero. The time depends on 'len' only.

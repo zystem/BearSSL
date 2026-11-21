@@ -68,6 +68,15 @@ jobs:
         run: |
           build/testcrypto all
           build/testx509
+      - name: Memory and speed of this machine (printed, not checked)
+        if: matrix.native == 1
+        continue-on-error: true
+        env:
+          CC: ${{ matrix.cc }}
+        run: |
+          $CC -O2 -Isrc -Iinc -Itest/fuzz test/bench_resources.c \
+            build/libbearssl.a -pthread -o bench_resources
+          ./bench_resources
       - name: Unit tests (emulator)
         if: matrix.native == 0
         run: |
@@ -94,16 +103,20 @@ jobs:
           sudo apt-get -qq install -y python3-venv
           sh test/tlsfuzzer/run.sh "$RUNNER_TEMP/tlsfuzzer"
 
-  # line coverage of src/ by the tests; fails below 80%
+  # coverage of src/ and of the TLS 1.3 C files by the tests; fails below the floors
   coverage:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Run the tests with gcov and add up the lines of src/
-        run: MIN=80 sh test/coverage.sh
+      - name: Peers for the interoperability scripts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gnutls-bin
+      - name: Run the tests with gcov and add up the lines and branches
+        run: MIN=80 MIN13=90 MINB13=65 sh test/coverage.sh
 
   # the same unit tests with AddressSanitizer and UndefinedBehaviorSanitizer
   # (the alignment check is off: BearSSL does some unaligned reads on purpose)

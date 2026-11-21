@@ -27,7 +27,7 @@
  * samples/server_basic.c with three changes: it echoes the application data
  * until the peer closes (tlsfuzzer expects that), it serves each connection
  * in a child process (a script that leaves a connection hanging must not
- * stop the next test), and it stops a child after 20 s. The server key and
+ * stop the next test), and it stops a child after 120 s. The server key and
  * certificate chain are the sample ones (samples/chain-*.h): tlsfuzzer does
  * not check them. Build: cc -DWITH_TLS13 -DSERVER_RSA=1 (or SERVER_EC=1)
  * -Iinc -Isamples test/tlsfuzzer/server.c build/libbearssl.a
@@ -344,7 +344,7 @@ main(int argc, char *argv[])
 			continue;
 		}
 		close(fd);
-		alarm(20);
+		alarm(120);
 
 		/*
 		 * Initialise the context with the cipher suites and
@@ -452,17 +452,17 @@ main(int argc, char *argv[])
 		 */
 		shutdown(cfd, SHUT_WR);
 		{
-			unsigned char junk[4096];
+			static unsigned char junk[16384];
 			int k;
 
-			for (k = 0; k < 50; k ++) {
+			for (k = 0; k < 2000; k ++) {
 				fd_set fds;
 				struct timeval tv;
 
 				FD_ZERO(&fds);
 				FD_SET(cfd, &fds);
-				tv.tv_sec = 0;
-				tv.tv_usec = 100000;
+				tv.tv_sec = 2;
+				tv.tv_usec = 0;
 				if (select(cfd + 1, &fds, NULL, NULL, &tv) <= 0
 					|| read(cfd, junk, sizeof junk) <= 0)
 				{

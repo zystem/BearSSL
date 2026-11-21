@@ -826,7 +826,41 @@ br_ssl_engine_tls13_res_master(br_ssl_engine_context *cc)
 	}
 	br_tls13_derive_secret(dig, cc->tls13_ks.secret, "res master",
 		cc->tls13_th, cc->tls13_resm);
+	/*
+	 * The handshake is over: nothing needs the handshake traffic
+	 * secrets, the master secret, the PSK or the key exchange values
+	 * any more. (The application traffic secrets stay for KeyUpdate and
+	 * the resumption secret for the tickets, until the connection ends.)
+	 */
+	br_tls13_wipe(&cc->tls13_ks, sizeof cc->tls13_ks);
+	br_tls13_wipe(cc->tls13_chs, sizeof cc->tls13_chs);
+	br_tls13_wipe(cc->tls13_shs, sizeof cc->tls13_shs);
+	br_tls13_wipe(cc->tls13_psk, sizeof cc->tls13_psk);
+	br_tls13_wipe(cc->tls13_priv, sizeof cc->tls13_priv);
+	br_tls13_wipe(cc->ecdhe_point, sizeof cc->ecdhe_point);
 	return 1;
+}
+
+/* see inner.h */
+void
+br_ssl_engine_tls13_wipe(br_ssl_engine_context *cc)
+{
+	br_tls13_wipe(&cc->tls13_ks, sizeof cc->tls13_ks);
+	br_tls13_wipe(cc->tls13_chs, sizeof cc->tls13_chs);
+	br_tls13_wipe(cc->tls13_shs, sizeof cc->tls13_shs);
+	br_tls13_wipe(cc->tls13_cap, sizeof cc->tls13_cap);
+	br_tls13_wipe(cc->tls13_sap, sizeof cc->tls13_sap);
+	br_tls13_wipe(cc->tls13_resm, sizeof cc->tls13_resm);
+	br_tls13_wipe(cc->tls13_psk, sizeof cc->tls13_psk);
+	br_tls13_wipe(cc->tls13_priv, sizeof cc->tls13_priv);
+	br_tls13_wipe(cc->tls13_pub, sizeof cc->tls13_pub);
+	br_tls13_wipe(cc->ecdhe_point, sizeof cc->ecdhe_point);
+	if (cc->tls13_in) {
+		br_tls13_wipe(&cc->in, sizeof cc->in);
+	}
+	if (cc->tls13_out) {
+		br_tls13_wipe(&cc->out, sizeof cc->out);
+	}
 }
 
 /* see inner.h */
