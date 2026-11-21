@@ -33,6 +33,10 @@ grpc-go v1.75.1 and nim-grpc, over TLS and mutual TLS: 21 cases (grpc-go client 
 
 `sh test/style_check.sh` checks tabs, trailing white space and the line length of the C files the fork added (CI step "Coding standard"); run on 2026-11-20: ok.
 
+## After the fixes of 2026-11-21
+
+Run on 2026-11-21 after the fixes in [conformance.md](conformance.md): `testcrypto all` and `testx509` also under AddressSanitizer + UndefinedBehaviorSanitizer (exit 0); both fuzz targets for 10 minutes with 4 workers each (no artifact); `sh test/interop_server13.sh`, 46 cases with OpenSSL, GnuTLS and Go; `sh test/tlsfuzzer/run.sh`.
+
 ## Sanitizers
 
 AddressSanitizer + UndefinedBehaviorSanitizer (alignment and function-type checks off; upstream loads unaligned words by design and fills its vtables with function pointer casts) on the unit tests and on the interop scripts: clean. An ASan binary built with an old libasan crashes at start now and then when `/proc/sys/vm/mmap_rnd_bits` is above 28; the runs here had it at 28 or checked it first. Alignment check: not run.

@@ -17,7 +17,7 @@
 | Cipher suites `TLS_AES_128_GCM_SHA256`, `TLS_AES_256_GCM_SHA384`, `TLS_CHACHA20_POLY1305_SHA256` | yes |
 | `TLS_AES_128_CCM_*` suites | no |
 | Key exchange groups | X25519 (the first share), then HelloRetryRequest to P-256, P-384 or P-521 (the groups that the EC implementation has) |
-| Signatures, verified and made | ECDSA P-256 (SHA-256), P-384 (SHA-384), P-521 (SHA-512) and RSA-PSS `rsae` with SHA-256, SHA-384 and SHA-512, each run against OpenSSL in the roles that make or verify it ([conformance.md](conformance.md)). Not Ed25519, not Ed448, not `rsa_pkcs1` in TLS 1.3 |
+| Signatures, verified and made | ECDSA P-256 (SHA-256), P-384 (SHA-384), P-521 (SHA-512) and RSA-PSS `rsae` with SHA-256, SHA-384 and SHA-512, each run against OpenSSL (all roles), GnuTLS and Go (P-521 and PSS-SHA512 as far as their configuration allows) ([conformance.md](conformance.md)). Not Ed25519, not Ed448, not `rsa_pkcs1` in TLS 1.3 |
 | HelloRetryRequest, cookie | yes (client and server) |
 | Client authentication (mutual TLS) during the handshake | yes |
 | Post-handshake client authentication | no |

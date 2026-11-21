@@ -319,6 +319,55 @@ if command -v openssl >/dev/null; then
 	done
 fi
 
+# The same schemes with GnuTLS and Go.
+if command -v gnutls-cli >/dev/null && command -v gnutls-serv >/dev/null; then
+	for c in "ecdsa-p521|p521|-ALL:+SIGN-ECDSA-SECP521R1-SHA512" \
+		"rsa-pss sha512|rsa|-ALL:+SIGN-RSA-PSS-RSAE-SHA512"; do
+		name=${c%%|*}; rest=${c#*|}; cert=${rest%%|*}; sig=${rest#*|}
+		start_server -cert "$DIR/$cert.crt" -key "$DIR/$cert.key"
+		( sleep 0.4; echo ping-from-peer; sleep 3.3 ) | timeout 15 \
+			gnutls-cli --priority "$PRI:-SIGN-ALL:${sig#-ALL:}" -p $PORT localhost \
+			--x509cafile "$DIR/$cert.crt" >"$DIR/p.log" 2>&1
+		check_server_run "gnutls client -> bear server, $name" "$DIR/p.log"
+		stop_server
+		gnutls-serv --port $PORT2 --priority "$PRI:-SIGN-ALL:${sig#-ALL:}" \
+			--x509certfile "$DIR/$cert.crt" --x509keyfile "$DIR/$cert.key" \
+			>"$DIR/gu.log" 2>&1 &
+		BG=$!
+		sleep 3
+		( echo ping-from-bear; sleep 1.5 ) | timeout 15 "$BRSSL" client \
+			127.0.0.1:$PORT2 -sni localhost -vmax tls13 \
+			-CA "$DIR/$cert.crt" >"$DIR/p.log" 2>&1
+		ok=1
+		grep -q "TLS 1.3" "$DIR/p.log" || ok=0
+		report "bear client -> gnutls server, $name" $ok
+		kill $BG >/dev/null 2>&1; { wait; } 2>/dev/null; sleep 1
+	done
+fi
+if [ -x "$DIR/goclient" ]; then
+	# a P-521 certificate can only be used with ecdsa_secp521r1_sha512
+	start_server -cert "$DIR/p521.crt" -key "$DIR/p521.key"
+	"$DIR/goclient" -addr 127.0.0.1:$PORT -ca "$DIR/p521.crt" \
+		>"$DIR/p.log" 2>&1
+	ok=1
+	grep -q "version=304" "$DIR/p.log" || ok=0
+	grep -q 'received "pong-from-bear' "$DIR/p.log" || ok=0
+	report "go client -> bear server, ecdsa-p521 (sha512)" $ok
+	stop_server
+	"$DIR/goserver" -addr 127.0.0.1:$PORT2 -cert "$DIR/p521.crt" \
+		-key "$DIR/p521.key" >"$DIR/gs.log" 2>&1 &
+	BG=$!
+	sleep 1
+	( echo ping-from-bear; sleep 1.5 ) | timeout 15 "$BRSSL" client \
+		127.0.0.1:$PORT2 -sni localhost -vmax tls13 \
+		-CA "$DIR/p521.crt" >"$DIR/p.log" 2>&1
+	ok=1
+	grep -q "TLS 1.3" "$DIR/p.log" || ok=0
+	grep -q "ping-from-bear" "$DIR/p.log" || ok=0
+	report "bear client -> go server, ecdsa-p521 (sha512)" $ok
+	kill $BG >/dev/null 2>&1; { wait; } 2>/dev/null
+fi
+
 # Our client resumes a session of other servers.
 if [ -f build/libbearssl.a ] && cc -O1 -Isrc -Iinc "$HERE/resume_client.c" \
 	build/libbearssl.a -o "$DIR/resume_client" 2>/dev/null; then

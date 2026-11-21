@@ -90,7 +90,7 @@ jobs:
           build/testcrypto all
           build/testx509
 
-  # the other implementations: GnuTLS and Go as peers (40 cases, both roles; a missing peer or a wrong number of cases fails)
+  # the other implementations: GnuTLS and Go as peers (46 cases, both roles; a missing peer or a wrong number of cases fails)
   interop:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -104,7 +104,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends gnutls-bin
       - run: make -j"$(nproc)"
       - name: Interoperability with OpenSSL, GnuTLS and Go
-        run: REQUIRE="openssl gnutls go" EXPECT=40 sh test/interop_server13.sh
+        run: REQUIRE="openssl gnutls go" EXPECT=46 sh test/interop_server13.sh
 
   # the committed handshake code must be what the T0 sources give
   t0:
