@@ -48,7 +48,7 @@ libFuzzer (clang 18, ASan + UBSan), client and server engines, build flag `BR_TL
 | `libbearssl.a` | 1 027 992 B | 1 075 300 B |
 | `client_basic` text (`-Os`, `--gc-sections`) | 116 625 B | 130 859 B (+12.2 %) |
 | `server_basic` text | 111 839 B | 125 647 B (+12.3 %) |
-| engine context | 3616 B | 5200 B |
+| engine context | 3616 B | 6024 B |
 | TLS 1.2 handshake, ECDHE-ECDSA-AES-128-GCM, 1000 runs | 1.334 ms | 1.334 ms |
 | TLS 1.3 handshake, AES-128-GCM | not available | 1.086 ms (client 0.736, server 0.339) |
 | TLS 1.2 with client authentication | 2.07 ms | 2.07 ms |

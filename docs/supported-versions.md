@@ -17,13 +17,13 @@
 | Cipher suites `TLS_AES_128_GCM_SHA256`, `TLS_AES_256_GCM_SHA384`, `TLS_CHACHA20_POLY1305_SHA256` | yes |
 | `TLS_AES_128_CCM_*` suites | no |
 | Key exchange groups | X25519 (the first share), then HelloRetryRequest to P-256, P-384 or P-521 (the groups that the EC implementation has) |
-| Signatures, verified and made | ECDSA P-256/384/521 (hash by curve), RSA-PSS (`rsae`, SHA-256/384/512). Not Ed25519, not Ed448, not `rsa_pkcs1` in TLS 1.3 |
+| Signatures, verified and made | ECDSA P-256 (SHA-256), P-384 (SHA-384), P-521 (SHA-512) and RSA-PSS `rsae` with SHA-256, SHA-384 and SHA-512, each run against OpenSSL in the roles that make or verify it ([conformance.md](conformance.md)). Not Ed25519, not Ed448, not `rsa_pkcs1` in TLS 1.3 |
 | HelloRetryRequest, cookie | yes (client and server) |
 | Client authentication (mutual TLS) during the handshake | yes |
 | Post-handshake client authentication | no |
 | ALPN, SNI, `record_size_limit` (RFC 8449), maximum fragment length | yes |
-| KeyUpdate | the peer's KeyUpdate is applied and answered; this library does not start one |
-| Session resumption with tickets and `psk_dhe_ke` | yes, tickets are identifiers in the server's session cache (no stateless tickets) |
+| KeyUpdate | the peer's KeyUpdate is applied and answered; the engine starts one before the limit of the cipher for one key (2^24 records with AES-GCM) |
+| Session resumption with tickets and `psk_dhe_ke` | yes, tickets are identifiers in the server's session cache (no stateless tickets). A session is resumed only under the same policy identifier, and, if the server asks for client certificates, only if the client used one. With a clock a ticket lives at most 7 days (`br_ssl_engine_set_tls13_time()`); without one it does not expire by itself |
 | `psk_ke` only, external PSK | no |
 | 0-RTT (early data) | no |
 | Downgrade protection (`DOWNGRD` in the server random) | yes (server sets it, client checks it) |

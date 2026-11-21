@@ -2314,6 +2314,27 @@ void br_ssl_engine_switch_gcm_in(br_ssl_engine_context *cc,
  */
 size_t br_ssl_engine_tls13_keygen(br_ssl_engine_context *cc);
 int br_ssl_engine_tls13_hs_keys(br_ssl_engine_context *cc);
+
+/*
+ * Server: compute and check the shared secret from the client's key share
+ * before the ServerHello is sent (in place in ecdhe_point); the keys are
+ * derived later by br_ssl_engine_tls13_hs_keys(). Returns 0 or an error.
+ */
+int br_ssl_engine_tls13_srv_ecdh(br_ssl_engine_context *cc);
+
+/*
+ * Set 'len' bytes to zero, with writes that the compiler may not remove
+ * (for a secret in an object that is about to go out of scope or to be
+ * reused; a plain memset() there is a dead store that optimisation drops).
+ */
+void br_tls13_wipe(void *p, size_t len);
+
+/*
+ * In the plaintext of a TLS 1.3 record (content, inner type, zero padding),
+ * the index of the inner type: the last non-zero byte; (size_t)-1 if all
+ * bytes are zero. The time depends on 'len' only.
+ */
+size_t br_tls13_find_type(const unsigned char *buf, size_t len);
 int br_ssl_engine_tls13_snapshot(br_ssl_engine_context *cc);
 size_t br_ssl_engine_tls13_finished(br_ssl_engine_context *cc,
 	int from_client);

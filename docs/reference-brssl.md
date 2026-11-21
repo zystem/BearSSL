@@ -8,6 +8,7 @@
 |---|---|---|
 | `-vmin` | `TLS-1.0` | Names: `TLS-1.0`, `TLS-1.1`, `TLS-1.2`, `TLS-1.3`; `-list` prints the short forms `tls10` to `tls13`, which also work. |
 | `-vmax` | `TLS-1.2` | **TLS 1.3 is off unless you pass `-vmax TLS-1.3`.** The same is true of programs that use the library: see [enable TLS 1.3](howto-enable-tls13.md). |
+| `-ku` | none (a KeyUpdate before the limit of the cipher: 2^24 records with AES-GCM, 2^32 with ChaCha20-Poly1305) | TLS 1.3: change the sending key after this number of records. For tests of KeyUpdate with another peer; a real program calls `br_ssl_engine_set_tls13_key_update_interval()`. |
 | `-cs` (cipher suites) | every suite of the tool's list up to `-vmax` (the TLS 1.3 ones only when `-vmax TLS-1.3`) | TLS 1.3 suites: `TLS13_AES_128_GCM_SHA256`, `TLS13_AES_256_GCM_SHA384`, `TLS13_CHACHA20_POLY1305_SHA256`. With `-cs` you list names; list only TLS 1.3 names and `-vmin TLS-1.3` for a TLS 1.3-only run. |
 | `-p` (server) | `4433` | |
 | `-cache` (server) | 5000 bytes | The server's tickets are entries of this cache (see [resumption](howto-resumption.md)): a small cache forgets tickets early. |
@@ -39,6 +40,7 @@ options:
    -list           list supported names (protocols, algorithms...)
    -vmin name      set minimum supported version (default: TLS-1.0)
    -vmax name      set maximum supported version (default: TLS-1.2)
+   -ku num         TLS 1.3: change the sending key after num records
    -cs names       set list of supported cipher suites (comma-separated)
    -hf names       add support for some hash functions (comma-separated)
    -minhello len   set minimum ClientHello length (in bytes)
@@ -68,6 +70,7 @@ options:
    -list           list supported names (protocols, algorithms...)
    -vmin name      set minimum supported version (default: TLS-1.0)
    -vmax name      set maximum supported version (default: TLS-1.2)
+   -ku num         TLS 1.3: change the sending key after num records
    -cs names       set list of supported cipher suites (comma-separated)
    -hf names       add support for some hash functions (comma-separated)
    -cbhash         test hashing in policy callback

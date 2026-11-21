@@ -793,6 +793,17 @@ recvrec_ack(br_ssl_engine_context *rc, size_t len)
 	 * we get back to "ready" state immediately.
 	 */
 	if (rc->ixa == rc->ixb) {
+		/*
+		 * In TLS 1.3 a Handshake or Alert record with no content is
+		 * an error (RFC 8446, section 5.4); an empty application
+		 * data record is allowed.
+		 */
+		if (rc->tls13_in && (rc->record_type_in == 21
+			|| rc->record_type_in == 22))
+		{
+			br_ssl_engine_fail(rc, BR_ERR_UNEXPECTED);
+			return;
+		}
 		make_ready_in(rc);
 	}
 }
@@ -888,6 +899,16 @@ sendpld_flush(br_ssl_engine_context *rc, int force)
 		return;
 	}
 	if (rc->tls13_out) {
+		/*
+		 * At the limit of the cipher for this key: stop (the engine
+		 * sends a KeyUpdate well before, see main13 in the handshake
+		 * code, unless the peer or the caller did not let it).
+		 */
+		if (rc->tls13_out_count >= rc->tls13_ku_hard) {
+			br_ssl_engine_fail(rc, BR_ERR_KEY_LIMIT);
+			return;
+		}
+		rc->tls13_out_count ++;
 		buf = rc->out.vtable13->encrypt(&rc->out.vtable13,
 			rc->record_type_out, rc->obuf + rc->oxc, &xlen);
 	} else {
@@ -1213,6 +1234,14 @@ br_ssl_engine_sendrec_ack(br_ssl_engine_context *cc, size_t len)
 		&& (cc->record_type_out != BR_SSL_APPLICATION_DATA
 		|| (cc->application_data & 1) == 0))
 	{
+		jump_handshake(cc, 0);
+	} else if (len != 0 && !has_rec_tosend(cc) && cc->tls13_out
+		&& cc->tls13_out_count >= cc->tls13_ku_soft)
+	{
+		/*
+		 * Application data record sent with a key that has reached
+		 * its limit: the handshake code changes the key (KeyUpdate).
+		 */
 		jump_handshake(cc, 0);
 	}
 }
@@ -1661,6 +1690,25 @@ br_ssl_engine_switch13(br_ssl_engine_context *cc, int for_input,
 				cc->iaes_ctr, key, key_len, cc->ighash, iv);
 		}
 		cc->tls13_out = 1;
+		/*
+		 * Limits of the cipher for one key (RFC 8446, section 5.5):
+		 * the engine sends a KeyUpdate after 2^24 records with AES-GCM
+		 * (the limit is about 2^24.5), and stops at the limit. For
+		 * ChaCha20-Poly1305 the limits are far away.
+		 */
+		cc->tls13_out_count = 0;
+		if (chapol) {
+			cc->tls13_ku_soft = (uint64_t)1 << 32;
+			cc->tls13_ku_hard = (uint64_t)1 << 40;
+		} else {
+			cc->tls13_ku_soft = (uint64_t)1 << 24;
+			cc->tls13_ku_hard = 23726566;
+		}
+		if (cc->tls13_ku_every != 0
+			&& cc->tls13_ku_every < cc->tls13_ku_soft)
+		{
+			cc->tls13_ku_soft = cc->tls13_ku_every;
+		}
 		if (cc->oxa == cc->oxc) {
 			/*
 			 * The current (empty) outgoing record was prepared
@@ -1670,7 +1718,8 @@ br_ssl_engine_switch13(br_ssl_engine_context *cc, int for_input,
 			make_ready_out(cc);
 		}
 	}
-	memset(key, 0, sizeof key);
+	br_tls13_wipe(key, sizeof key);
+	br_tls13_wipe(iv, sizeof iv);
 	return 1;
 }
 

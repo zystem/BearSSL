@@ -9479,6 +9479,99 @@ test_TLS13_KS(void)
 		fprintf(stderr, "TLS13 traffic upd: output equals input\n");
 		exit(EXIT_FAILURE);
 	}
+
+	/*
+	 * br_tls13_expand_label_checked(): the same result as the plain
+	 * function for good arguments; an error (and nothing written) for
+	 * each argument that breaks a precondition.
+	 */
+	{
+		unsigned char o1[32], o2[32], big[300];
+		static const char longlabel[] =
+			"0123456789012345678901234567890123456789012345678901234567890123"
+			"4567890123456789012345678901234567890123456789012345678901234567"
+			"8901234567890123456789012345678901234567890123456789012345678901"
+			"2345678901234567890123456789012345678901234567890123456789";
+
+		memset(big, 0x41, sizeof big);
+		memset(o1, 0x55, sizeof o1);
+		br_tls13_expand_label(&br_sha256_vtable, tmp2, "key", NULL, 0, o1, 16);
+		memset(o2, 0x55, sizeof o2);
+		if (!br_tls13_expand_label_checked(&br_sha256_vtable, tmp2, "key",
+			NULL, 0, o2, 16) || memcmp(o1, o2, 32) != 0)
+		{
+			fprintf(stderr, "TLS13 expand_label_checked: good call\n");
+			exit(EXIT_FAILURE);
+		}
+		memset(o2, 0x55, sizeof o2);
+		if (br_tls13_expand_label_checked(&br_sha256_vtable, tmp2, "key",
+				NULL, 0, o2, 33)
+			|| br_tls13_expand_label_checked(&br_sha256_vtable, tmp2,
+				"key", NULL, 0, o2, 0)
+			|| br_tls13_expand_label_checked(&br_sha256_vtable, tmp2,
+				"key", big, 256, o2, 16)
+			|| br_tls13_expand_label_checked(&br_sha256_vtable, tmp2,
+				"key", NULL, 5, o2, 16)
+			|| br_tls13_expand_label_checked(&br_sha256_vtable, tmp2,
+				longlabel, NULL, 0, o2, 16)
+			|| br_tls13_expand_label_checked(NULL, tmp2, "key", NULL, 0,
+				o2, 16)
+			|| br_tls13_expand_label_checked(&br_sha256_vtable, tmp2,
+				NULL, NULL, 0, o2, 16))
+		{
+			fprintf(stderr, "TLS13 expand_label_checked: bad call accepted\n");
+			exit(EXIT_FAILURE);
+		}
+		if (o2[0] != 0x55 || o2[31] != 0x55) {
+			fprintf(stderr, "TLS13 expand_label_checked: output written\n");
+			exit(EXIT_FAILURE);
+		}
+		/* the largest label and context that are allowed */
+		if (!br_tls13_expand_label_checked(&br_sha256_vtable, tmp2,
+			longlabel + (sizeof longlabel - 1 - 249), big, 255, o2, 32))
+		{
+			fprintf(stderr, "TLS13 expand_label_checked: largest call\n");
+			exit(EXIT_FAILURE);
+		}
+	}
+
+	/* br_tls13_wipe() and the search of the inner type */
+	{
+		unsigned char buf[40];
+		size_t u;
+
+		memset(buf, 0xAA, sizeof buf);
+		br_tls13_wipe(buf + 3, 20);
+		for (u = 0; u < sizeof buf; u ++) {
+			if ((buf[u] == 0) != (u >= 3 && u < 23)) {
+				fprintf(stderr, "TLS13 wipe\n");
+				exit(EXIT_FAILURE);
+			}
+		}
+		memset(buf, 0, sizeof buf);
+		if (br_tls13_find_type(buf, sizeof buf) != (size_t)-1
+			|| br_tls13_find_type(buf, 0) != (size_t)-1)
+		{
+			fprintf(stderr, "TLS13 find_type: all zero\n");
+			exit(EXIT_FAILURE);
+		}
+		for (u = 0; u < sizeof buf; u ++) {
+			memset(buf, 0, sizeof buf);
+			buf[u] = 23;
+			if (br_tls13_find_type(buf, sizeof buf) != u) {
+				fprintf(stderr, "TLS13 find_type at %u\n", (unsigned)u);
+				exit(EXIT_FAILURE);
+			}
+		}
+		memset(buf, 0, sizeof buf);
+		buf[5] = 1;
+		buf[9] = 22;
+		buf[12] = 0;
+		if (br_tls13_find_type(buf, sizeof buf) != 9) {
+			fprintf(stderr, "TLS13 find_type: last one\n");
+			exit(EXIT_FAILURE);
+		}
+	}
 	printf(" done.\n");
 	fflush(stdout);
 }
@@ -9778,10 +9871,25 @@ test_TLS13_REC(void)
 	test13_init(1, 1, "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f", "a0a1a2a3a4a5a6a7a8a9aaab", &tc);
 	ic = (const br_sslrec13_in_class **)&tc.gcm.vtable.in;
 	if ((*ic)->check_length(ic, 16) || !(*ic)->check_length(ic, 17)
-		|| !(*ic)->check_length(ic, 16384 + 256)
-		|| (*ic)->check_length(ic, 16384 + 257))
+		|| !(*ic)->check_length(ic, 16384 + 1 + 16)
+		|| (*ic)->check_length(ic, 16384 + 1 + 16 + 1))
 	{
 		fprintf(stderr, "TLS13 length check failed\n");
+		exit(EXIT_FAILURE);
+	}
+	/*
+	 * The inner plaintext (content, type, padding) is at most 2^14 + 1
+	 * bytes: a record with more padding is refused (RFC 8446, 5.4), for
+	 * both ciphers.
+	 */
+	test13_init(0, 1, "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f", "404142434445464748494a4b", &tc);
+	ic = (const br_sslrec13_in_class **)&tc.cc.vtable.in;
+	if ((*ic)->check_length(ic, 16) || !(*ic)->check_length(ic, 17)
+		|| !(*ic)->check_length(ic, 16384 + 1 + 16)
+		|| (*ic)->check_length(ic, 16384 + 1 + 16 + 1)
+		|| (*ic)->check_length(ic, 16384 + 256))
+	{
+		fprintf(stderr, "TLS13 length check (ChaCha20) failed\n");
 		exit(EXIT_FAILURE);
 	}
 	test13_init(1, 0, "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f", "a0a1a2a3a4a5a6a7a8a9aaab", &tc);
@@ -10859,6 +10967,435 @@ test_TLS13_LOOPBACK(void)
 	fflush(stdout);
 }
 
+/*
+ * Resumption of a TLS 1.3 session: a clock (lifetime and age of the ticket),
+ * the policy identifier of the server, and client authentication (a session
+ * of an unauthenticated client is not resumed by a server that asks for
+ * client certificates).
+ */
+typedef struct {
+	int use_clock;          /* set the clock of the client and the server */
+	uint32_t cnow, snow;    /* their clocks */
+	int cclock, sclock;     /* which of them have a clock */
+	uint32_t policy;        /* policy identifier of the server */
+	int mtls;               /* the server asks for client certificates */
+	int offer;              /* the client offers the saved session */
+	unsigned char salt;     /* random values */
+	unsigned suite;         /* cipher suite, 0 for 0x1301 */
+	uint64_t ku_every;      /* KeyUpdate interval (records), 0 for none */
+} sess_opts;
+
+typedef struct {
+	int err_c, err_s;
+	int resumed_c, resumed_s;
+	int cauth;
+	uint32_t obf_age;
+} sess_result;
+
+static br_ssl_client_context lcc;
+static br_ssl_server_context lsc;
+static br_x509_minimal_context lxc;
+static br_x509_knownkey_context lkk, lsk;
+static unsigned char ib1[BR_SSL_BUFSIZE_BIDI], ib2[BR_SSL_BUFSIZE_BIDI];
+
+/* the engines of a client and a server, ready for a handshake */
+static void
+sess_setup(const sess_opts *o, br_ssl_session_parameters *saved,
+	br_ssl_session_cache_lru *lru,
+	br_ssl_engine_context **pce, br_ssl_engine_context **pse)
+{
+	uint16_t suite = o->suite ? (uint16_t)o->suite : 0x1301;
+	static unsigned char dn[512];
+	static const unsigned char seed[32] = { 9 };
+	static br_x509_certificate chain[1];
+	static br_ec_private_key sk;
+	static br_x509_trust_anchor ta[1];
+	static br_x509_decoder_context dc;
+	br_ssl_engine_context *ce, *se;
+	unsigned char sd[32];
+
+	chain[0].data = (unsigned char *)FUZZ_CERT;
+	chain[0].data_len = sizeof FUZZ_CERT;
+	sk.curve = BR_EC_secp256r1;
+	sk.x = (unsigned char *)FUZZ_KEY;
+	sk.xlen = sizeof FUZZ_KEY;
+	br_x509_decoder_init(&dc, NULL, NULL);
+	br_x509_decoder_push(&dc, FUZZ_CERT, sizeof FUZZ_CERT);
+	ta[0].pkey = *br_x509_decoder_get_pkey(&dc);
+	memcpy(dn, "ca", 2);
+	ta[0].dn.data = dn;
+	ta[0].dn.len = 2;
+	ta[0].flags = BR_X509_TA_CA;
+
+	br_ssl_client_init_full(&lcc, &lxc, ta, 1);
+	br_ssl_server_init_full_ec(&lsc, chain, 1, BR_KEYTYPE_EC, &sk);
+	ce = &lcc.eng;
+	se = &lsc.eng;
+	br_ssl_server_set_cache(&lsc, &lru->vtable);
+	br_ssl_server_set_tls13_policy_id(&lsc, o->policy);
+	br_x509_knownkey_init_ec(&lkk, &ta[0].pkey.key.ec, BR_KEYTYPE_SIGN);
+	br_x509_knownkey_init_ec(&lsk, &ta[0].pkey.key.ec, BR_KEYTYPE_SIGN);
+	br_ssl_engine_set_x509(ce, &lkk.vtable);
+	br_ssl_engine_set_versions(ce, BR_TLS12, BR_TLS13);
+	br_ssl_engine_set_versions(se, BR_TLS12, BR_TLS13);
+	br_ssl_engine_set_suites(ce, &suite, 1);
+	br_ssl_engine_set_suites(se, &suite, 1);
+	/* the client can always authenticate itself; the server asks or not */
+	br_ssl_client_set_single_ec(&lcc, chain, 1, &sk, BR_KEYTYPE_SIGN,
+		BR_KEYTYPE_EC, br_ec_get_default(),
+		br_ecdsa_sign_asn1_get_default());
+	if (o->mtls) {
+		br_ssl_server_set_trust_anchor_names_alt(&lsc, ta, 1);
+		br_ssl_engine_set_default_rsavrfy(se);
+		br_ssl_engine_set_ecdsa(se, br_ecdsa_vrfy_asn1_get_default());
+		br_ssl_engine_set_x509(se, &lsk.vtable);
+	}
+	br_ssl_engine_set_buffer(ce, ib1, sizeof ib1, 1);
+	br_ssl_engine_set_buffer(se, ib2, sizeof ib2, 1);
+	ce->rng_os_rand_done = 1;
+	se->rng_os_rand_done = 1;
+	memcpy(sd, seed, 32);
+	sd[1] = o->salt;
+	br_ssl_engine_inject_entropy(ce, sd, 32);
+	sd[2] = 77;
+	br_ssl_engine_inject_entropy(se, sd, 32);
+	br_ssl_engine_set_tls13_key_update_interval(ce, o->ku_every);
+	br_ssl_engine_set_tls13_key_update_interval(se, o->ku_every);
+	if (o->cclock) {
+		br_ssl_engine_set_tls13_time(ce, o->cnow);
+	}
+	if (o->sclock) {
+		br_ssl_engine_set_tls13_time(se, o->snow);
+	}
+	if (o->offer) {
+		br_ssl_engine_set_session_parameters(ce, saved);
+	}
+	br_ssl_client_reset(&lcc, "localhost", o->offer);
+	br_ssl_server_reset(&lsc);
+	*pce = ce;
+	*pse = se;
+}
+
+static void
+sess_run(const sess_opts *o, br_ssl_session_parameters *saved,
+	br_ssl_session_cache_lru *lru, sess_result *r)
+{
+	br_ssl_engine_context *ce, *se;
+
+	sess_setup(o, saved, lru, &ce, &se);
+	loop_pump(ce, se);
+	r->err_c = br_ssl_engine_last_error(ce);
+	r->err_s = br_ssl_engine_last_error(se);
+	r->resumed_c = (ce->tls13_resumed == 2);
+	r->resumed_s = (se->tls13_resumed == 2);
+	r->cauth = se->tls13_cauth;
+	r->obf_age = ce->tls13_obf_age;
+	br_ssl_engine_get_session_parameters(ce, saved);
+}
+
+static void
+test_TLS13_SESSION(void)
+{
+	static unsigned char cachebuf[4096];
+	br_ssl_session_cache_lru lru;
+	br_ssl_session_parameters saved, first;
+	sess_opts o;
+	sess_result r;
+	uint32_t age_add;
+
+	printf("Test TLS 1.3 session resumption rules: ");
+	fflush(stdout);
+
+	/* A first connection, with clocks, then a resumption one hour later
+	   with the true age of the ticket. */
+	br_ssl_session_cache_lru_init(&lru, cachebuf, sizeof cachebuf);
+	memset(&saved, 0, sizeof saved);
+	memset(&o, 0, sizeof o);
+	o.cclock = o.sclock = 1;
+	o.cnow = o.snow = 1000;
+	o.salt = 1;
+	sess_run(&o, &saved, &lru, &r);
+	H13_CHECK(r.err_c == 0 && r.err_s == 0 && !r.resumed_c && !r.resumed_s,
+		"session: first connection");
+	H13_CHECK(saved.ticket_len == 32 && saved.issued_valid
+		&& saved.ticket_issued == 1000 && saved.ticket_lifetime == 604800,
+		"session: the ticket carries its time and a lifetime of 7 days");
+	first = saved;
+	age_add = saved.ticket_age_add;
+
+	o.offer = 1;
+	o.cnow = o.snow = 1000 + 3600;
+	o.salt = 2;
+	sess_run(&o, &saved, &lru, &r);
+	H13_CHECK(r.err_c == 0 && r.err_s == 0 && r.resumed_c && r.resumed_s,
+		"session: resumed after one hour");
+	H13_CHECK(r.obf_age == 3600u * 1000u + age_add,
+		"session: the client sends the true age of the ticket");
+
+	/* The client's clock is past the lifetime: it does not offer. */
+	saved = first;
+	o.cnow = o.snow = 1000 + 604800;
+	o.salt = 3;
+	sess_run(&o, &saved, &lru, &r);
+	H13_CHECK(r.err_c == 0 && r.err_s == 0 && !r.resumed_c && !r.resumed_s,
+		"session: expired on the client");
+
+	/* One second before the end it is still good. */
+	saved = first;
+	o.cnow = o.snow = 1000 + 604799;
+	o.salt = 4;
+	sess_run(&o, &saved, &lru, &r);
+	H13_CHECK(r.err_c == 0 && r.err_s == 0 && r.resumed_c && r.resumed_s,
+		"session: last second of the lifetime");
+
+	/* A client without a clock offers it; the server's clock says that it
+	   is too old, and the server answers with a full handshake. */
+	saved = first;
+	o.cclock = 0;
+	o.snow = 1000 + 604800 + 1;
+	o.salt = 5;
+	sess_run(&o, &saved, &lru, &r);
+	H13_CHECK(r.err_c == 0 && r.err_s == 0 && !r.resumed_c && !r.resumed_s,
+		"session: expired on the server");
+	H13_CHECK(r.obf_age == age_add,
+		"session: no clock, the age that is sent is zero");
+
+	/* The server's policy changed: full handshake. */
+	saved = first;
+	memset(&o, 0, sizeof o);
+	o.cclock = o.sclock = 1;
+	o.cnow = o.snow = 2000;
+	o.policy = 1;
+	o.offer = 1;
+	o.salt = 6;
+	sess_run(&o, &saved, &lru, &r);
+	H13_CHECK(r.err_c == 0 && r.err_s == 0 && !r.resumed_c && !r.resumed_s,
+		"session: another policy, no resumption");
+	/* ... and the new session is resumed under the new policy */
+	o.cnow = o.snow = 2100;
+	o.salt = 7;
+	sess_run(&o, &saved, &lru, &r);
+	H13_CHECK(r.err_c == 0 && r.err_s == 0 && r.resumed_c && r.resumed_s,
+		"session: the new policy resumes its own session");
+
+	/* A session of an unauthenticated client is not resumed by a server
+	   that now asks for client certificates: the client authenticates. */
+	br_ssl_session_cache_lru_init(&lru, cachebuf, sizeof cachebuf);
+	memset(&saved, 0, sizeof saved);
+	memset(&o, 0, sizeof o);
+	o.salt = 8;
+	sess_run(&o, &saved, &lru, &r);
+	H13_CHECK(r.err_c == 0 && r.err_s == 0 && !r.cauth,
+		"session: no client authentication");
+	o.offer = 1;
+	o.salt = 9;
+	sess_run(&o, &saved, &lru, &r);
+	H13_CHECK(r.err_c == 0 && r.err_s == 0 && r.resumed_c && r.resumed_s
+		&& !r.cauth, "session: unauthenticated session, same policy");
+	o.mtls = 1;
+	o.salt = 10;
+	sess_run(&o, &saved, &lru, &r);
+	H13_CHECK(r.err_c == 0 && r.err_s == 0 && !r.resumed_c && !r.resumed_s
+		&& r.cauth, "session: a server that asks for certificates does "
+		"a full handshake and gets the client's certificate");
+	/* the session of the authenticated client is resumed, and stays
+	   an authenticated one */
+	o.salt = 11;
+	sess_run(&o, &saved, &lru, &r);
+	H13_CHECK(r.err_c == 0 && r.err_s == 0 && r.resumed_c && r.resumed_s
+		&& r.cauth, "session: authenticated session resumed");
+	o.salt = 12;
+	sess_run(&o, &saved, &lru, &r);
+	H13_CHECK(r.err_c == 0 && r.err_s == 0 && r.resumed_c && r.resumed_s
+		&& r.cauth, "session: and again (still authenticated)");
+
+	printf("done.\n");
+	fflush(stdout);
+}
+
+/*
+ * Keys of the application data: the engine sends a KeyUpdate before the
+ * limit of the cipher for one key, and stops at the limit. The limits are
+ * lowered for the test.
+ */
+/* like loop_move(), but it stops when the peer takes no more bytes */
+static void
+ku_move(br_ssl_engine_context *from, br_ssl_engine_context *to)
+{
+	unsigned char *b;
+	size_t len, off = 0;
+
+	b = br_ssl_engine_sendrec_buf(from, &len);
+	if (b == NULL) {
+		return;
+	}
+	while (off < len) {
+		unsigned char *rb;
+		size_t rl, n;
+
+		rb = br_ssl_engine_recvrec_buf(to, &rl);
+		if (rb == NULL) {
+			break;
+		}
+		n = len - off;
+		if (n > rl) {
+			n = rl;
+		}
+		memcpy(rb, b + off, n);
+		br_ssl_engine_recvrec_ack(to, n);
+		off += n;
+	}
+	if (off > 0) {
+		br_ssl_engine_sendrec_ack(from, off);
+	}
+}
+
+static int
+ku_send(br_ssl_engine_context *from, br_ssl_engine_context *to,
+	const char *msg, int *errs)
+{
+	unsigned char *b;
+	size_t len, n;
+	int u;
+
+	n = strlen(msg);
+	for (u = 0; u < 20
+		&& !(br_ssl_engine_current_state(from) & BR_SSL_SENDAPP); u ++)
+	{
+		/* a KeyUpdate may still have to go out or to be read */
+		ku_move(from, to);
+		ku_move(to, from);
+	}
+	if (!(br_ssl_engine_current_state(from) & BR_SSL_SENDAPP)) {
+		return 0;
+	}
+	b = br_ssl_engine_sendapp_buf(from, &len);
+	memcpy(b, msg, n);
+	br_ssl_engine_sendapp_ack(from, n);
+	br_ssl_engine_flush(from, 0);
+	for (u = 0; u < 100; u ++) {
+		int progress = 0;
+
+		if (br_ssl_engine_current_state(from) & BR_SSL_SENDREC) {
+			ku_move(from, to);
+			progress = 1;
+		}
+		if (br_ssl_engine_current_state(to) & BR_SSL_SENDREC) {
+			ku_move(to, from);
+			progress = 1;
+		}
+		if (br_ssl_engine_current_state(to) & BR_SSL_RECVAPP) {
+			b = br_ssl_engine_recvapp_buf(to, &len);
+			if (len != n || memcmp(b, msg, n) != 0) {
+				*errs += 1;
+			}
+			br_ssl_engine_recvapp_ack(to, len);
+			return 1;
+		}
+		if (!progress) {
+			break;
+		}
+	}
+	return 0;
+}
+
+static void
+test_TLS13_KEYUPDATE(void)
+{
+	static unsigned char cachebuf[4096];
+	br_ssl_session_cache_lru lru;
+	br_ssl_session_parameters saved;
+	sess_opts o;
+	br_ssl_engine_context *ce, *se;
+	unsigned char cap0[48], sap0[48];
+	int u, errs, ok, suite;
+	static const uint16_t suites[3] = { 0x1301, 0x1302, 0x1303 };
+
+	printf("Test TLS 1.3 key limits: ");
+	fflush(stdout);
+
+	for (suite = 0; suite < 3; suite ++) {
+		br_ssl_session_cache_lru_init(&lru, cachebuf, sizeof cachebuf);
+		memset(&saved, 0, sizeof saved);
+		memset(&o, 0, sizeof o);
+		o.salt = (unsigned char)(20 + suite);
+		o.suite = suites[suite];
+		sess_setup(&o, &saved, &lru, &ce, &se);
+		loop_pump(ce, se);
+		H13_CHECK(br_ssl_engine_last_error(ce) == 0
+			&& br_ssl_engine_last_error(se) == 0, "limits: handshake");
+		/* the defaults, by cipher */
+		H13_CHECK(ce->tls13_ku_soft == (suite == 2
+			? ((uint64_t)1 << 32) : ((uint64_t)1 << 24))
+			&& ce->tls13_ku_hard > ce->tls13_ku_soft,
+			"limits: defaults of the cipher");
+		/* a KeyUpdate after every 4 records in each direction */
+		o.ku_every = 4;
+		o.salt ++;
+		br_ssl_session_cache_lru_init(&lru, cachebuf, sizeof cachebuf);
+		sess_setup(&o, &saved, &lru, &ce, &se);
+		loop_pump(ce, se);
+		H13_CHECK(br_ssl_engine_last_error(ce) == 0
+			&& br_ssl_engine_last_error(se) == 0
+			&& ce->tls13_ku_soft == 4 && se->tls13_ku_soft == 4,
+			"limits: the interval is the limit");
+		memcpy(cap0, ce->tls13_cap, 48);
+		memcpy(sap0, ce->tls13_sap, 48);
+
+		errs = 0;
+		ok = 0;
+		for (u = 0; u < 60; u ++) {
+			char m1[32], m2[32];
+
+			sprintf(m1, "client record %d", u);
+			sprintf(m2, "server record number %d", u);
+			ok += ku_send(ce, se, m1, &errs);
+			ok += ku_send(se, ce, m2, &errs);
+		}
+		/* let a KeyUpdate that is still on its way arrive */
+		for (u = 0; u < 10; u ++) {
+			if (br_ssl_engine_current_state(ce) & BR_SSL_SENDREC) {
+				ku_move(ce, se);
+			}
+			if (br_ssl_engine_current_state(se) & BR_SSL_SENDREC) {
+				ku_move(se, ce);
+			}
+		}
+		H13_CHECK(ok == 120 && errs == 0
+			&& br_ssl_engine_last_error(ce) == 0
+			&& br_ssl_engine_last_error(se) == 0,
+			"limits: data in both directions across the updates");
+		H13_CHECK(memcmp(cap0, ce->tls13_cap, 48) != 0
+			&& memcmp(sap0, ce->tls13_sap, 48) != 0
+			&& memcmp(ce->tls13_cap, se->tls13_cap, 48) == 0
+			&& memcmp(ce->tls13_sap, se->tls13_sap, 48) == 0,
+			"limits: the keys changed, on both sides the same");
+		H13_CHECK(ce->tls13_out_count < 8 && se->tls13_out_count < 8,
+			"limits: the count restarts with each key");
+	}
+
+	/* at the hard limit without a KeyUpdate the engine stops */
+	br_ssl_session_cache_lru_init(&lru, cachebuf, sizeof cachebuf);
+	memset(&saved, 0, sizeof saved);
+	memset(&o, 0, sizeof o);
+	o.salt = 30;
+	o.suite = 0x1301;
+	sess_setup(&o, &saved, &lru, &ce, &se);
+	loop_pump(ce, se);
+	ce->tls13_ku_soft = (uint64_t)1 << 40;
+	ce->tls13_ku_hard = ce->tls13_out_count + 5;
+	errs = 0;
+	ok = 0;
+	for (u = 0; u < 20; u ++) {
+		ok += ku_send(ce, se, "x", &errs);
+	}
+	H13_CHECK(ok == 5 && br_ssl_engine_last_error(ce) == BR_ERR_KEY_LIMIT,
+		"limits: the engine stops at the hard limit");
+
+	printf("done.\n");
+	fflush(stdout);
+}
+
 #define STU(x)   { &test_ ## x, #x }
 
 static const struct {
@@ -10881,6 +11418,8 @@ static const struct {
 	STU(TLS13_REPLAY),
 	STU(TLS13_HRR),
 	STU(TLS13_LOOPBACK),
+	STU(TLS13_SESSION),
+	STU(TLS13_KEYUPDATE),
 	STU(SHAKE),
 	STU(HMAC_DRBG),
 	STU(AESCTR_DRBG),

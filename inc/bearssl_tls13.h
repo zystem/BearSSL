@@ -141,6 +141,24 @@ void br_tls13_expand_label(const br_hash_class *dig, const void *secret,
 	void *out, size_t out_len);
 
 /**
+ * \brief `HKDF-Expand-Label` with a check of its arguments.
+ *
+ * Same as `br_tls13_expand_label()`, but it checks the preconditions and
+ * returns 0 (writing nothing to `out`) if one is not met: `dig` is not
+ * a hash function with an output of at most `BR_TLS13_MAX_HASH_LEN`
+ * bytes, the label is longer than 249 bytes, `context_len` is more than
+ * 255, `context` is `NULL` with a non-zero `context_len`, or `out_len` is
+ * 0 or larger than the hash output length. Use it when the label, the
+ * context or the length come from outside your code. (`br_tls13_expand_label()`
+ * calls it and, on an error, fills `out` with zero bytes.)
+ *
+ * \return  1 on success, 0 on error.
+ */
+int br_tls13_expand_label_checked(const br_hash_class *dig,
+	const void *secret, const char *label,
+	const void *context, size_t context_len, void *out, size_t out_len);
+
+/**
  * \brief `Derive-Secret` (RFC 8446, section 7.1).
  *
  * It is `HKDF-Expand-Label(secret, label, transcript_hash, Hash.length)`.

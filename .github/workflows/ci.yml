@@ -37,6 +37,22 @@ jobs:
       - name: Coding standard of the files this fork added
         run: sh test/style_check.sh
 
+  # the TLS 1.3 server against scripts of tlsfuzzer (pinned by commit);
+  # it needs the network for tlsfuzzer, tlslite-ng and the python package ecdsa
+  tlsfuzzer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build
+        run: make -j"$(nproc)"
+      - name: tlsfuzzer scripts that must pass
+        run: |
+          sudo apt-get -qq install -y python3-venv
+          sh test/tlsfuzzer/run.sh "$RUNNER_TEMP/tlsfuzzer"
+
   # line coverage of src/ by the tests; fails below 80%
   coverage:
     runs-on: ubuntu-24.04
@@ -74,7 +90,7 @@ jobs:
           build/testcrypto all
           build/testx509
 
-  # the other implementations: GnuTLS and Go as peers (31 cases, both roles)
+  # the other implementations: GnuTLS and Go as peers (40 cases, both roles; a missing peer or a wrong number of cases fails)
   interop:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -88,7 +104,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends gnutls-bin
       - run: make -j"$(nproc)"
       - name: Interoperability with OpenSSL, GnuTLS and Go
-        run: sh test/interop_server13.sh
+        run: REQUIRE="openssl gnutls go" EXPECT=40 sh test/interop_server13.sh
 
   # the committed handshake code must be what the T0 sources give
   t0:
