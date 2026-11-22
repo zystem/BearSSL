@@ -289,6 +289,8 @@ br_ssl_engine_fail(br_ssl_engine_context *rc, int err)
 	if (rc->iomode != BR_IO_FAILED) {
 		rc->iomode = BR_IO_FAILED;
 		rc->err = err;
+		/* the engine does no more I/O: its TLS 1.3 secrets go */
+		br_ssl_engine_tls13_wipe(rc);
 	}
 }
 

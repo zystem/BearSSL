@@ -7,7 +7,7 @@
 # Usage: sh test/style_check.sh      exit 0 if all is well
 cd "$(dirname "$0")/.." || exit 2
 FILES="inc/bearssl_tls13.h src/ssl/ssl_rec13_*.c \
-src/ssl/ssl_tls13_*.c test/fuzz/*.c test/resume_client.c test/bench_handshake.c"
+src/ssl/ssl_tls13_*.c test/fuzz/*.c test/resume_client.c test/bench_handshake.c test/bench_resources.c"
 fail=0
 for f in $FILES; do
 	[ -f "$f" ] || { echo "missing: $f"; fail=1; continue; }

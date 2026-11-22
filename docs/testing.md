@@ -29,7 +29,7 @@ grpc-go v1.75.1 and nim-grpc, over TLS and mutual TLS: 21 cases (grpc-go client 
 
 ## Coverage and style
 
-`sh test/coverage.sh` builds with `--coverage`, runs `testcrypto all`, `testx509` and `test/interop_openssl13.sh`, and adds up the lines of `src/` that gcov reports (the CI job `coverage` fails below 80 %). Run by hand on 2026-11-20 (gcc 13, Linux x86-64, 3 min 37 s): 17798 of 20409 lines, **87.2 %**. This is line coverage of the whole of `src/`, upstream's code included; the files with no coverage are the ones nothing here uses (for example PEM encoding, CBC and CCM records, the RSA single-key handlers). Branch coverage was not measured. The interoperability script with GnuTLS and Go (`test/interop_server13.sh`) is not part of this number.
+`sh test/coverage.sh` builds with `--coverage`, runs `testcrypto all`, `testx509` and the interoperability scripts (the peers that are installed), and adds up the lines of `src/` that gcov reports and the lines and branches of the TLS 1.3 C files (`ssl_tls13_*.c`, `ssl_rec13_*.c`); the CI job `coverage` fails below 80 % of the lines of `src/`, 90 % of the lines of the TLS 1.3 C files and 65 % of their branches taken at least once. Run on 2026-11-22 (with OpenSSL, GnuTLS and Go): 87.8 % of `src/`, 91.5 % of the 745 lines of the TLS 1.3 C files, 69.3 % of their 345 branches (most of the rest are refusals of impossible arguments). The handshake is written in T0 and gcov cannot see into the table that the T0 compiler makes: those paths are covered by the loopback, tamper, session and HelloRetryRequest tests and by the interop scripts, not by a number. Run by hand on 2026-11-20 (gcc 13, Linux x86-64, 3 min 37 s): 17798 of 20409 lines, **87.2 %**. This is line coverage of the whole of `src/`, upstream's code included; the files with no coverage are the ones nothing here uses (for example PEM encoding, CBC and CCM records, the RSA single-key handlers). Branch coverage was not measured. The interoperability script with GnuTLS and Go (`test/interop_server13.sh`) is not part of this number.
 
 The X.509 test vectors of `test/x509` are text (a PEM-like block with Base64; `read_file` in `test/test_x509.c` decodes them); `build/testx509` printed the same 55 lines with the text vectors as with the binary ones (checked 2026-11-20).
 
@@ -38,6 +38,39 @@ The X.509 test vectors of `test/x509` are text (a PEM-like block with Base64; `r
 ## After the fixes of 2026-11-21
 
 Run on 2026-11-21 after the fixes in [conformance.md](conformance.md): `testcrypto all` and `testx509` also under AddressSanitizer + UndefinedBehaviorSanitizer (exit 0); both fuzz targets for 10 minutes with 4 workers each (no artifact); `sh test/interop_server13.sh`, 46 cases with OpenSSL, GnuTLS and Go; `sh test/tlsfuzzer/run.sh`.
+
+## Memory and speed
+
+`test/bench_resources.c` prints the sizes of the contexts, the stack of the deepest call of a handshake, and the speed of the record layer (the CI job `portability` prints the same on the other machines of GitHub; its output is not checked). Run on 2026-11-22 on the laptop (Linux x86-64, 13th Gen Intel Core i9, gcc 13.3, library at `-Os`, the program at `-O2`, one core, no other load):
+
+```bash
+cc -O2 -Isrc -Iinc -Itest/fuzz test/bench_resources.c build/libbearssl.a -pthread -o bench_resources && taskset -c 3 ./bench_resources
+```
+
+```text
+Sizes (bytes)
+  br_ssl_engine_context              6024
+  br_ssl_client_context              6128
+  br_ssl_server_context              6536
+  br_x509_minimal_context            3176
+  br_ssl_session_parameters           620
+  BR_SSL_BUFSIZE_BIDI (two buffers) 33178   BR_SSL_BUFSIZE_MONO 16709
+  a client: context + X.509 + both buffers: 42482
+Stack of the deepest call of a handshake (one engine)
+  TLS 1.2 ECDHE-ECDSA AES-128-GCM     11760 bytes of stack
+  TLS 1.3 AES-128-GCM                 11888 bytes of stack
+  TLS 1.3 AES-256-GCM                 11888 bytes of stack
+  TLS 1.3 ChaCha20-Poly1305           11888 bytes of stack
+  TLS 1.3, client authentication      11888 bytes of stack
+Records
+  AES-128-GCM (ct64)      1024 byte records:    39.4 MB/s (protect + unprotect)
+  AES-128-GCM (ct64)     16384 byte records:    47.7 MB/s (protect + unprotect)
+  AES-256-GCM (ct64)     16384 byte records:    39.8 MB/s (protect + unprotect)
+  ChaCha20-Poly1305       1024 byte records:   139.2 MB/s (protect + unprotect)
+  ChaCha20-Poly1305      16384 byte records:   159.5 MB/s (protect + unprotect)
+```
+
+What it shows: TLS 1.3 needs about 130 bytes more stack than TLS 1.2 for the deepest call (the figure includes the frames of the test program, under 1 KiB), and the engine context is larger by the TLS 1.3 state (the resumption ticket, the secrets, the counters). The record speed is that of the constant-time software AES (`aes_ct64`, the portable default) and of the portable ChaCha20; AES-NI and the CLMUL hash would be faster and are not used here (the program selects the portable code on purpose, so that the figures can be compared with other machines). The text sizes of the TLS 1.3 files at `-Os`: `ssl_tls13_hs.o` 8857 bytes, `ssl_tls13_ks.o` 1981, `ssl_rec13_gcm.o` 1554, `ssl_rec13_chapol.o` 983, and the generated handshake `ssl_hs_client.o` 13 526 and `ssl_hs_server.o` 14 198 (both include TLS 1.2). **Not measured**: the stack with RSA keys or with the whole chain validation of a long chain, the memory of a server with many connections, a gRPC stream with key updates, speed on an ARM or embedded core (only printed by CI), and the time of a resumption handshake.
 
 ## Sanitizers
 

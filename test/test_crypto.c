@@ -10983,6 +10983,8 @@ typedef struct {
 	unsigned char salt;     /* random values */
 	unsigned suite;         /* cipher suite, 0 for 0x1301 */
 	uint64_t ku_every;      /* KeyUpdate interval (records), 0 for none */
+	int wrong_skey;         /* the server signs with another key */
+	int wrong_ckey;         /* the client signs with another key */
 } sess_opts;
 
 typedef struct {
@@ -11008,7 +11010,8 @@ sess_setup(const sess_opts *o, br_ssl_session_parameters *saved,
 	static unsigned char dn[512];
 	static const unsigned char seed[32] = { 9 };
 	static br_x509_certificate chain[1];
-	static br_ec_private_key sk;
+	static br_ec_private_key sk, ssk, csk;
+	static unsigned char skx[sizeof FUZZ_KEY], ckx[sizeof FUZZ_KEY];
 	static br_x509_trust_anchor ta[1];
 	static br_x509_decoder_context dc;
 	br_ssl_engine_context *ce, *se;
@@ -11019,6 +11022,18 @@ sess_setup(const sess_opts *o, br_ssl_session_parameters *saved,
 	sk.curve = BR_EC_secp256r1;
 	sk.x = (unsigned char *)FUZZ_KEY;
 	sk.xlen = sizeof FUZZ_KEY;
+	/* keys that do not match the certificate: one bit of the key differs */
+	ssk = csk = sk;
+	memcpy(skx, FUZZ_KEY, sizeof skx);
+	memcpy(ckx, FUZZ_KEY, sizeof ckx);
+	skx[sizeof skx - 1] ^= 2;
+	ckx[sizeof ckx - 1] ^= 2;
+	if (o->wrong_skey) {
+		ssk.x = skx;
+	}
+	if (o->wrong_ckey) {
+		csk.x = ckx;
+	}
 	br_x509_decoder_init(&dc, NULL, NULL);
 	br_x509_decoder_push(&dc, FUZZ_CERT, sizeof FUZZ_CERT);
 	ta[0].pkey = *br_x509_decoder_get_pkey(&dc);
@@ -11028,7 +11043,7 @@ sess_setup(const sess_opts *o, br_ssl_session_parameters *saved,
 	ta[0].flags = BR_X509_TA_CA;
 
 	br_ssl_client_init_full(&lcc, &lxc, ta, 1);
-	br_ssl_server_init_full_ec(&lsc, chain, 1, BR_KEYTYPE_EC, &sk);
+	br_ssl_server_init_full_ec(&lsc, chain, 1, BR_KEYTYPE_EC, &ssk);
 	ce = &lcc.eng;
 	se = &lsc.eng;
 	br_ssl_server_set_cache(&lsc, &lru->vtable);
@@ -11041,7 +11056,7 @@ sess_setup(const sess_opts *o, br_ssl_session_parameters *saved,
 	br_ssl_engine_set_suites(ce, &suite, 1);
 	br_ssl_engine_set_suites(se, &suite, 1);
 	/* the client can always authenticate itself; the server asks or not */
-	br_ssl_client_set_single_ec(&lcc, chain, 1, &sk, BR_KEYTYPE_SIGN,
+	br_ssl_client_set_single_ec(&lcc, chain, 1, &csk, BR_KEYTYPE_SIGN,
 		BR_KEYTYPE_EC, br_ec_get_default(),
 		br_ecdsa_sign_asn1_get_default());
 	if (o->mtls) {
@@ -11396,6 +11411,332 @@ test_TLS13_KEYUPDATE(void)
 	fflush(stdout);
 }
 
+/*
+ * The secrets of a TLS 1.3 connection are wiped: the handshake secrets, the
+ * master secret, the PSK and the key exchange values when the handshake is
+ * over, everything when the connection ends.
+ */
+static int
+all_zero(const void *p, size_t n)
+{
+	const unsigned char *b = p;
+	size_t u;
+
+	for (u = 0; u < n; u ++) {
+		if (b[u] != 0) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
+static void
+test_TLS13_WIPE(void)
+{
+	static unsigned char cachebuf[4096];
+	br_ssl_session_cache_lru lru;
+	br_ssl_session_parameters saved;
+	sess_opts o;
+	br_ssl_engine_context *ce, *se;
+	int round, u;
+
+	printf("Test TLS 1.3 wiping of secrets: ");
+	fflush(stdout);
+	for (round = 0; round < 2; round ++) {
+		br_ssl_session_cache_lru_init(&lru, cachebuf, sizeof cachebuf);
+		memset(&saved, 0, sizeof saved);
+		memset(&o, 0, sizeof o);
+		o.salt = (unsigned char)(40 + round);
+		if (round == 1) {
+			/* a resumed connection has a PSK */
+			sess_setup(&o, &saved, &lru, &ce, &se);
+			loop_pump(ce, se);
+			br_ssl_engine_get_session_parameters(ce, &saved);
+			o.offer = 1;
+			o.salt ++;
+		}
+		sess_setup(&o, &saved, &lru, &ce, &se);
+		loop_pump(ce, se);
+		H13_CHECK(br_ssl_engine_last_error(ce) == 0
+			&& br_ssl_engine_last_error(se) == 0
+			&& (round == 0 || (ce->tls13_resumed == 2
+				&& se->tls13_resumed == 2)), "wipe: connection");
+		/* handshake over, connection open */
+		H13_CHECK(all_zero(&ce->tls13_ks, sizeof ce->tls13_ks)
+			&& all_zero(&se->tls13_ks, sizeof se->tls13_ks)
+			&& all_zero(ce->tls13_chs, sizeof ce->tls13_chs)
+			&& all_zero(se->tls13_chs, sizeof se->tls13_chs)
+			&& all_zero(ce->tls13_shs, sizeof ce->tls13_shs)
+			&& all_zero(se->tls13_shs, sizeof se->tls13_shs)
+			&& all_zero(ce->tls13_psk, sizeof ce->tls13_psk)
+			&& all_zero(se->tls13_psk, sizeof se->tls13_psk)
+			&& all_zero(ce->tls13_priv, sizeof ce->tls13_priv)
+			&& all_zero(se->tls13_priv, sizeof se->tls13_priv),
+			"wipe: handshake secrets are gone after the handshake");
+		H13_CHECK(!all_zero(ce->tls13_cap, 32) && !all_zero(se->tls13_sap, 32)
+			&& !all_zero(se->tls13_resm, 32),
+			"wipe: the application secrets are still there");
+		/* close the connection from the client side */
+		br_ssl_engine_close(ce);
+		for (u = 0; u < 20; u ++) {
+			if (br_ssl_engine_current_state(ce) & BR_SSL_SENDREC) {
+				ku_move(ce, se);
+			}
+			if (br_ssl_engine_current_state(se) & BR_SSL_SENDREC) {
+				ku_move(se, ce);
+			}
+			if (br_ssl_engine_current_state(se) & BR_SSL_RECVAPP) {
+				size_t len;
+
+				br_ssl_engine_recvapp_buf(se, &len);
+				br_ssl_engine_recvapp_ack(se, len);
+			}
+			if ((br_ssl_engine_current_state(se) & BR_SSL_SENDAPP)
+				&& !br_ssl_engine_closed(se))
+			{
+				br_ssl_engine_close(se);
+			}
+		}
+		H13_CHECK(br_ssl_engine_closed(ce) && br_ssl_engine_closed(se),
+			"wipe: closed");
+		H13_CHECK(all_zero(ce->tls13_cap, sizeof ce->tls13_cap)
+			&& all_zero(se->tls13_cap, sizeof se->tls13_cap)
+			&& all_zero(ce->tls13_sap, sizeof ce->tls13_sap)
+			&& all_zero(se->tls13_sap, sizeof se->tls13_sap)
+			&& all_zero(ce->tls13_resm, sizeof ce->tls13_resm)
+			&& all_zero(se->tls13_resm, sizeof se->tls13_resm)
+			&& all_zero(&ce->in, sizeof ce->in)
+			&& all_zero(&ce->out, sizeof ce->out)
+			&& all_zero(&se->in, sizeof se->in)
+			&& all_zero(&se->out, sizeof se->out),
+			"wipe: all secrets and the record keys are gone after the close");
+	}
+	printf("done.\n");
+	fflush(stdout);
+}
+
+/*
+ * What a production build refuses (the fuzzing build accepts what the
+ * fuzzer makes up, so these cases are only here): a flipped bit in every
+ * protected record, in each direction, a wrong Finished in each direction, a
+ * signature made with another key (server and client), a wrong binder (see
+ * TLS13_LOOPBACK).
+ */
+static int
+tamper_move(br_ssl_engine_context *from, br_ssl_engine_context *to,
+	int is_dir, int *count, int want, int mode, int *hit)
+{
+	unsigned char *b, tmp[17000];
+	size_t len, off = 0;
+
+	b = br_ssl_engine_sendrec_buf(from, &len);
+	if (b == NULL || len > sizeof tmp) {
+		return 0;
+	}
+	memcpy(tmp, b, len);
+	if (is_dir && len > 5 && tmp[0] == 23) {
+		if (*count == want) {
+			/* the first byte of the ciphertext, or the last of the tag */
+			tmp[mode ? len - 1 : 5] ^= 0x01;
+			*hit = 1;
+		}
+		*count += 1;
+	}
+	while (off < len) {
+		unsigned char *rb;
+		size_t rl, n;
+
+		rb = br_ssl_engine_recvrec_buf(to, &rl);
+		if (rb == NULL) {
+			break;
+		}
+		n = len - off;
+		if (n > rl) {
+			n = rl;
+		}
+		memcpy(rb, tmp + off, n);
+		br_ssl_engine_recvrec_ack(to, n);
+		off += n;
+	}
+	br_ssl_engine_sendrec_ack(from, off > 0 ? len : 0);
+	return off > 0;
+}
+
+/* both sides send a line after the handshake; returns the lines received */
+static int
+tamper_run(const sess_opts *o, int dir, int want, int mode, int *hit,
+	int *err_c, int *err_s)
+{
+	static unsigned char cachebuf[4096];
+	br_ssl_session_cache_lru lru;
+	br_ssl_session_parameters saved;
+	br_ssl_engine_context *ce, *se;
+	int cnt = 0, u, got = 0, sent_c = 0, sent_s = 0;
+	unsigned char *b;
+	size_t len;
+
+	br_ssl_session_cache_lru_init(&lru, cachebuf, sizeof cachebuf);
+	memset(&saved, 0, sizeof saved);
+	sess_setup(o, &saved, &lru, &ce, &se);
+	*hit = 0;
+	for (u = 0; u < 300; u ++) {
+		int progress = 0;
+
+		if (tamper_move(ce, se, dir == 0, &cnt, want, mode, hit)) {
+			progress = 1;
+		}
+		if (tamper_move(se, ce, dir == 1, &cnt, want, mode, hit)) {
+			progress = 1;
+		}
+		if (!sent_c && (br_ssl_engine_current_state(ce) & BR_SSL_SENDAPP)) {
+			b = br_ssl_engine_sendapp_buf(ce, &len);
+			memcpy(b, "from the client", 15);
+			br_ssl_engine_sendapp_ack(ce, 15);
+			br_ssl_engine_flush(ce, 0);
+			sent_c = progress = 1;
+		}
+		if (!sent_s && (br_ssl_engine_current_state(se) & BR_SSL_SENDAPP)) {
+			b = br_ssl_engine_sendapp_buf(se, &len);
+			memcpy(b, "from the server", 15);
+			br_ssl_engine_sendapp_ack(se, 15);
+			br_ssl_engine_flush(se, 0);
+			sent_s = progress = 1;
+		}
+		if (br_ssl_engine_current_state(se) & BR_SSL_RECVAPP) {
+			b = br_ssl_engine_recvapp_buf(se, &len);
+			got += (len == 15 && memcmp(b, "from the client", 15) == 0);
+			br_ssl_engine_recvapp_ack(se, len);
+			progress = 1;
+		}
+		if (br_ssl_engine_current_state(ce) & BR_SSL_RECVAPP) {
+			b = br_ssl_engine_recvapp_buf(ce, &len);
+			got += (len == 15 && memcmp(b, "from the server", 15) == 0);
+			br_ssl_engine_recvapp_ack(ce, len);
+			progress = 1;
+		}
+		if (!progress) {
+			break;
+		}
+	}
+	*err_c = br_ssl_engine_last_error(ce);
+	*err_s = br_ssl_engine_last_error(se);
+	return got;
+}
+
+static void
+test_TLS13_TAMPER(void)
+{
+	sess_opts o;
+	int dir, k, mode, hit, ec, es, got, tampered, suite, mtls;
+	static const unsigned suites[3] = { 0x1301, 0x1302, 0x1303 };
+
+	printf("Test TLS 1.3 refusals: ");
+	fflush(stdout);
+
+	for (suite = 0; suite < 3; suite ++) {
+		for (mtls = 0; mtls < 2; mtls ++) {
+			memset(&o, 0, sizeof o);
+			o.suite = suites[suite];
+			o.mtls = mtls;
+			o.salt = (unsigned char)(60 + suite * 2 + mtls);
+			/* the control: nothing is changed */
+			got = tamper_run(&o, 0, 1000, 0, &hit, &ec, &es);
+			H13_CHECK(got == 2 && ec == 0 && es == 0 && !hit,
+				"tamper: the control works");
+			tampered = 0;
+			for (dir = 0; dir < 2; dir ++) {
+				for (k = 0; k < 12; k ++) {
+					for (mode = 0; mode < 2; mode ++) {
+						got = tamper_run(&o, dir, k, mode, &hit, &ec, &es);
+						if (!hit) {
+							continue;
+						}
+						tampered ++;
+						/* the receiver of the record refuses it */
+						H13_CHECK((dir == 0 ? es : ec) == BR_ERR_BAD_MAC
+							&& got < 2,
+							"tamper: a changed record is refused");
+					}
+				}
+			}
+			/* about 6 protected records per direction with mutual
+			   authentication, fewer without */
+			H13_CHECK(tampered >= 10, "tamper: enough records");
+		}
+	}
+
+	/* a wrong Finished: the client's view of the handshake secrets is
+	   changed once it has read the ServerHello */
+	for (suite = 0; suite < 3; suite ++) {
+		int which;
+
+		for (which = 0; which < 2; which ++) {
+			static unsigned char cachebuf[4096];
+			br_ssl_session_cache_lru lru;
+			br_ssl_session_parameters saved;
+			br_ssl_engine_context *ce, *se;
+			int cnt = 0, u, flipped = 0, h;
+
+			memset(&o, 0, sizeof o);
+			o.suite = suites[suite];
+			o.salt = (unsigned char)(80 + suite * 2 + which);
+			br_ssl_session_cache_lru_init(&lru, cachebuf, sizeof cachebuf);
+			memset(&saved, 0, sizeof saved);
+			sess_setup(&o, &saved, &lru, &ce, &se);
+			for (u = 0; u < 200; u ++) {
+				int p = 0;
+
+				p |= tamper_move(ce, se, 0, &cnt, 1000, 0, &h);
+				p |= tamper_move(se, ce, 0, &cnt, 1000, 0, &h);
+				if (!flipped && ce->tls13_hlen != 0) {
+					/* keys are known to the client: change a secret */
+					if (which == 0) {
+						ce->tls13_shs[0] ^= 1;  /* server Finished wrong */
+					} else {
+						ce->tls13_chs[0] ^= 1;  /* client Finished wrong */
+					}
+					flipped = 1;
+				}
+				if (!p) {
+					break;
+				}
+			}
+			H13_CHECK(flipped, "tamper: secret changed");
+			if (which == 0) {
+				H13_CHECK(br_ssl_engine_last_error(ce) == BR_ERR_BAD_FINISHED,
+					"tamper: a wrong server Finished is refused");
+			} else {
+				H13_CHECK(br_ssl_engine_last_error(se)
+					== BR_ERR_BAD_FINISHED
+					|| br_ssl_engine_last_error(se)
+					== BR_ERR_SEND_FATAL_ALERT + 51,
+					"tamper: a wrong client Finished is refused");
+			}
+		}
+	}
+
+	/* a signature made with another key than the one of the certificate */
+	for (suite = 0; suite < 3; suite ++) {
+		memset(&o, 0, sizeof o);
+		o.suite = suites[suite];
+		o.wrong_skey = 1;
+		o.salt = (unsigned char)(90 + suite);
+		got = tamper_run(&o, 0, 1000, 0, &hit, &ec, &es);
+		H13_CHECK(got == 0 && ec == BR_ERR_BAD_SIGNATURE,
+			"tamper: a server signature that does not verify is refused");
+		memset(&o, 0, sizeof o);
+		o.suite = suites[suite];
+		o.mtls = 1;
+		o.wrong_ckey = 1;
+		o.salt = (unsigned char)(100 + suite);
+		got = tamper_run(&o, 0, 1000, 0, &hit, &ec, &es);
+		H13_CHECK(got < 2 && es == BR_ERR_BAD_SIGNATURE,
+			"tamper: a client signature that does not verify is refused");
+	}
+	printf("done.\n");
+	fflush(stdout);
+}
+
 #define STU(x)   { &test_ ## x, #x }
 
 static const struct {
@@ -11420,6 +11761,8 @@ static const struct {
 	STU(TLS13_LOOPBACK),
 	STU(TLS13_SESSION),
 	STU(TLS13_KEYUPDATE),
+	STU(TLS13_WIPE),
+	STU(TLS13_TAMPER),
 	STU(SHAKE),
 	STU(HMAC_DRBG),
 	STU(AESCTR_DRBG),

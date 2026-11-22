@@ -71,6 +71,17 @@ for n in $GATE; do
 		run $n -x "sanity - x448" -x "x448 - key share from other curve" \
 			-x "x448 - point at infinity" -x "x448 - right 0-padded key_share" \
 			-x "x448 - right-truncated key_share" || fail=1
+	elif [ $n = finished ]; then
+		# The probes that send a Finished message padded with 196 608 bytes
+		# and with 16 MB fail now and then (about one run in eight): the
+		# server sends the alert and the python client, which needs minutes
+		# for that much data, sometimes does not read it. The cause was not
+		# found; the probes stay out of the gate.
+		run $n \
+			-e "padding - cipher TLS_AES_128_GCM_SHA256, pad_byte 0, pad_left 0, pad_right 196608" \
+			-e "padding - cipher TLS_AES_256_GCM_SHA384, pad_byte 0, pad_left 0, pad_right 196608" \
+			-e "padding - cipher TLS_AES_128_GCM_SHA256, pad_byte 0, pad_left 0, pad_right 16777183" \
+			-e "padding - cipher TLS_AES_256_GCM_SHA384, pad_byte 0, pad_left 0, pad_right 16777167" || fail=1
 	else
 		run $n || fail=1
 	fi
