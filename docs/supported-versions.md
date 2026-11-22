@@ -42,7 +42,8 @@ Built and run on Linux x86-64 with gcc 13 and clang 18. Not run on other platfor
 
 | Release | Based on upstream | State |
 |---|---|---|
-| `v0.6.1-tls13.0` (2026-11-20) | `7bea48e` | latest, supported ([SECURITY.md](../SECURITY.md)) |
+| `v0.6.1-tls13.1` (2026-11-22) | `7bea48e` | latest, supported ([SECURITY.md](../SECURITY.md)) |
+| `v0.6.1-tls13.0` (2026-11-20) | `7bea48e` | supported until 2026-12-22, for fixes of high and critical problems only; **upgrade: it accepts an X25519 key share of small order** |
 
 ## Upstream base
 
