@@ -34,7 +34,7 @@ If the identity is anything but the release workflow of this repository on a `v*
 
 ## The tag
 
-The first release, `v0.6.1-tls13.0`, has an annotated tag that is **not signed**. From the next release on the tag `vX.Y.Z-tls13.N` is an annotated tag signed with an SSH key by the maintainer who made the release ([releasing.md](releasing.md)); a maintainer adds their public key here when they first make a release. The key of `zystem` is:
+The first release, `v0.6.1-tls13.0`, has an annotated tag that is **not signed**. From `v0.6.1-tls13.1` on the tag `vX.Y.Z-tls13.N` is an annotated tag signed with an SSH key by the maintainer who made the release ([releasing.md](releasing.md)); a maintainer adds their public key here when they first make a release. The key of `zystem` is:
 
 ```
 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHPp5WWSw0xFjlzPEtln90NY8dc7MUvkun/14yTINPM/
@@ -47,4 +47,6 @@ echo "10708003+zystem@users.noreply.github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5A
 git -c gpg.ssh.allowedSignersFile=allowed_signers tag -v vX.Y.Z-tls13.N
 ```
 
-That prints `Good "git" signature for 10708003+zystem@users.noreply.github.com with ED25519 key SHA256:lW4a...`. Signing and checking were run on a throw-away tag on 2026-11-20 (good signature); no release tag of this repository is signed yet. The signatures of the release files do not depend on the tag. The source in the archive is the tree at the tag: compare it with `git archive vX.Y.Z-tls13.N` of a clone.
+That prints `Good "git" signature for 10708003+zystem@users.noreply.github.com with ED25519 key SHA256:lW4a...`. Signing and checking were run on a throw-away tag on 2026-11-20 and on the tag `v0.6.1-tls13.1` on 2026-11-22 (good signature both times); `v0.6.1-tls13.0` is the only release tag that is not signed. The signatures of the release files do not depend on the tag. The source in the archive is the tree at the tag: compare it with `git archive vX.Y.Z-tls13.N` of a clone.
+
+Run on 2026-11-22 on the release `v0.6.1-tls13.1` (cosign 3.0.2, `gh attestation verify`, the machine of the maintainer): the release workflow passed on the first run; `sha256sum -c` passed; `cosign verify-blob` passed for the archive, the SBOM (20 packages) and the VEX document; `gh attestation verify` of the archive returned exit code 0; the list of files of the archive equals `git archive` of the tag; `git tag -v` of the tag printed a good signature of the key above. Not run: the check by anyone else, and a check on another machine.
