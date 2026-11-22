@@ -4,6 +4,10 @@ Changes against upstream BearSSL `7bea48e`. Dates 2026. Versions are `X.Y.Z-tls1
 
 ## Unreleased
 
+## 0.6.1-tls13.1 — 2026-11-22
+
+Security and conformance fixes found with tlsfuzzer, with other TLS implementations as peers, in their closed issues and in the review of 2026-11-21 (all in [docs/conformance.md](docs/conformance.md)). **Upgrade from `0.6.1-tls13.0`**: that release accepts an X25519 key share of small order (an all-zero shared secret, RFC 8446 section 7.4.2), resumes a session under another client-authentication policy, and has no limit of records for one key. No CVE was assigned: there was no report from outside the project. This release needs a **rebuild of everything that includes the headers** (the structures grew, the cache entries are 112 bytes). Still not independently audited. The 24 hour fuzz run of this code (192.168.100.4, 8 workers per target, started 2026-11-21 16:03) was **not finished** when this release was made; the 24 hour runs of the earlier code and a 10 minute run of this code found nothing ([docs/testing.md](docs/testing.md)). The tag of this release is the first one that is signed.
+
 ### Fixed (2026-11-22, the rest of the review of 2026-11-21: [docs/conformance.md](docs/conformance.md))
 - The TLS 1.3 secrets are wiped: the handshake secrets, the master secret, the PSK and the key exchange values when the handshake is over, all secrets and the record keys when the engine fails or is closed.
 
