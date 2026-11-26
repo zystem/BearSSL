@@ -83,10 +83,14 @@ libFuzzer (clang 18, ASan + UBSan), client and server engines, build flag `BR_TL
 | Machine | Target | Run | Result |
 |---|---|---|---|
 | 192.168.100.77 | server, 2 workers | finished: 86 401 s | 15 530 581 runs in one worker's log; **no artifact** |
-| 192.168.100.4 (hypervisor, `nice 19`) | client and server, 8 workers each | both finished: 86 401 s | 0 artifacts in each; the last worker of each ran 10 768 445 (client) and 9 982 862 (server) times; the eight worker logs (6.4 to 11.1 million) are shared by both targets, so a total is not stated; **no artifact** |
+| 192.168.100.4 (hypervisor, `nice 19`) | client and server, 8 workers each | both finished: 86 401 s | all 8 jobs of each exited with code 0; **no artifact**. The two targets ran in one directory and wrote the same worker log files, so the numbers of runs cannot be given per target (a figure per target that this table had until 2026-11-26 was taken from those files and is withdrawn) |
 | 192.168.100.85 | client, 2 workers | **stopped after about 18.8 hours**: the machine restarted (boot at 21:41 on 2026-11-20; the logs end at 19:02 and 19:08, the cause was not found) | about 10.3 and 12.5 million runs in the two workers' last lines; **no artifact**; the 24 hours were not reached |
 
-So the gate "24 h without a finding" is met for the server (two machines) and for the client on the hypervisor (code `f08786e`); the client run of the first machine is short of 24 hours. These runs are of code that is older than the fixes of 2026-11-21. A run of the fixed code (commit `0fa53ee`, both targets, 8 workers each, `nice 19`) was started on 192.168.100.4 on 2026-11-21 at 16:03 (+02:00) and ends at 16:03 on 2026-11-22; **its result is not known yet**. The fixed code was also fuzzed for 10 minutes with 4 workers each (no artifact).
+So the gate "24 h without a finding" is met for the server (two machines) and for the client on the hypervisor (code `f08786e`); the client run of the first machine is short of 24 hours. These runs are of code that is older than the fixes of 2026-11-21.
+
+**The 24 hour run of the code of release `v0.6.1-tls13.1`** (commit `0fa53ee`, read on 2026-11-26; it finished after that release was made): 192.168.100.4 (Xeon E5-2673 v3, 24 threads), both targets at the same time, 8 workers each, `nice 19`, binaries built with clang 18, from 2026-11-21 16:03 to 2026-11-22 16:03 (+02:00). All 8 jobs of each target exited with code 0 after 86 401 s, **no artifact** (no crash, timeout or out-of-memory file); the corpora ended with 16 388 (client) and 20 788 (server) files. As in the run before, the two targets wrote the same worker log files, so there is no number of runs per target (the surviving worker logs end between 9.5 and 13.5 million runs each). `test/fuzz/run.sh` gives each target its own log directory; these two runs were started with another script that did not.
+
+The fixes of the reassessment of 2026-11-22 ([conformance.md](conformance.md)) are newer than this run and **were not fuzzed for 24 hours**.
 
 ## Size and speed (2026-11-20, one machine)
 
