@@ -1788,6 +1788,7 @@ cc: verify-CV-sig ( sig-len -- err ) {
 		drop close-elt 0 ret
 	then
 	0 x509-start-chain
+	cert-hash-chain
 	open-elt
 	begin
 		dup while
@@ -1797,9 +1798,11 @@ cc: verify-CV-sig ( sig-len -- err ) {
 			dup while
 			dup 256 > if 256 else dup then { len }
 			addr-pad len read-blob
+			len cert-hash-feed
 			len x509-append
 		repeat
 		close-elt
+		cert-hash-cert-end
 		x509-end-cert
 		read16 skip-blob
 	repeat

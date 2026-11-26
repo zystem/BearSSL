@@ -4,6 +4,16 @@ Changes against upstream BearSSL `7bea48e`. Dates 2026. Versions are `X.Y.Z-tls1
 
 ## Unreleased
 
+### Fixed (2026-11-22, the reassessment of that day: [docs/conformance.md](docs/conformance.md))
+- A server refuses a ticket at exactly 7 days, like a client; `br_ssl_engine_set_tls13_clock_required()` skips tickets when there is no clock; `test/resume_client.c` sets the clock.
+- The SHA-256 of the client's certificate is kept with a TLS 1.3 session (`br_ssl_engine_tls13_client_cert_hash()`), so a program that needs the identity of the client has it after a resumption.
+- `br_ssl_session_cache_lru_forget()` overwrites the secret of the entry; new `br_ssl_session_cache_lru_wipe()`.
+- One exit that wipes the shared secret on every path of the handshake-key function.
+- The interop script keeps the logs of a failed case and waits for a port to listen.
+
+### Changed (needs a rebuild of dependent code)
+- `br_ssl_session_parameters` has `cert_hash`; `br_ssl_engine_context` has the clock flag, the hash of the client certificate and a SHA-256 context; the entries of `br_ssl_session_cache_lru` are 144 bytes (112 before): size the cache again.
+
 ## 0.6.1-tls13.1 — 2026-11-22
 
 Security and conformance fixes found with tlsfuzzer, with other TLS implementations as peers, in their closed issues and in the review of 2026-11-21 (all in [docs/conformance.md](docs/conformance.md)). **Upgrade from `0.6.1-tls13.0`**: that release accepts an X25519 key share of small order (an all-zero shared secret, RFC 8446 section 7.4.2), resumes a session under another client-authentication policy, and has no limit of records for one key. No CVE was assigned: there was no report from outside the project. This release needs a **rebuild of everything that includes the headers** (the structures grew, the cache entries are 112 bytes). Still not independently audited. The 24 hour fuzz run of this code (192.168.100.4, 8 workers per target, started 2026-11-21 16:03) was **not finished** when this release was made; the 24 hour runs of the earlier code and a 10 minute run of this code found nothing ([docs/testing.md](docs/testing.md)). The tag of this release is the first one that is signed.

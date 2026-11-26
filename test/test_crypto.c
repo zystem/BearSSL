@@ -10985,6 +10985,7 @@ typedef struct {
 	uint64_t ku_every;      /* KeyUpdate interval (records), 0 for none */
 	int wrong_skey;         /* the server signs with another key */
 	int wrong_ckey;         /* the client signs with another key */
+	int clock_req;          /* both sides require a clock */
 } sess_opts;
 
 typedef struct {
@@ -10992,6 +10993,8 @@ typedef struct {
 	int resumed_c, resumed_s;
 	int cauth;
 	uint32_t obf_age;
+	int has_hash;           /* the server knows the client's certificate */
+	int hash_ok;            /* ... and it is the right one */
 } sess_result;
 
 static br_ssl_client_context lcc;
@@ -11074,6 +11077,8 @@ sess_setup(const sess_opts *o, br_ssl_session_parameters *saved,
 	br_ssl_engine_inject_entropy(ce, sd, 32);
 	sd[2] = 77;
 	br_ssl_engine_inject_entropy(se, sd, 32);
+	br_ssl_engine_set_tls13_clock_required(ce, o->clock_req);
+	br_ssl_engine_set_tls13_clock_required(se, o->clock_req);
 	br_ssl_engine_set_tls13_key_update_interval(ce, o->ku_every);
 	br_ssl_engine_set_tls13_key_update_interval(se, o->ku_every);
 	if (o->cclock) {
@@ -11104,6 +11109,16 @@ sess_run(const sess_opts *o, br_ssl_session_parameters *saved,
 	r->resumed_c = (ce->tls13_resumed == 2);
 	r->resumed_s = (se->tls13_resumed == 2);
 	r->cauth = se->tls13_cauth;
+	{
+		unsigned char h[32], want[32];
+		br_sha256_context hc;
+
+		br_sha256_init(&hc);
+		br_sha256_update(&hc, FUZZ_CERT, sizeof FUZZ_CERT);
+		br_sha256_out(&hc, want);
+		r->has_hash = br_ssl_engine_tls13_client_cert_hash(se, h);
+		r->hash_ok = r->has_hash && memcmp(h, want, 32) == 0;
+	}
 	r->obf_age = ce->tls13_obf_age;
 	br_ssl_engine_get_session_parameters(ce, saved);
 }
@@ -11163,6 +11178,23 @@ test_TLS13_SESSION(void)
 	H13_CHECK(r.err_c == 0 && r.err_s == 0 && r.resumed_c && r.resumed_s,
 		"session: last second of the lifetime");
 
+	/* The server refuses the ticket at exactly its lifetime too (the client
+	   does the same): the boundary is the same on both sides. */
+	saved = first;
+	o.cclock = 0;
+	o.snow = 1000 + 604800;
+	o.salt = 14;
+	sess_run(&o, &saved, &lru, &r);
+	H13_CHECK(r.err_c == 0 && r.err_s == 0 && !r.resumed_c && !r.resumed_s,
+		"session: the server refuses a ticket at exactly 7 days");
+	saved = first;
+	o.snow = 1000 + 604799;
+	o.salt = 15;
+	sess_run(&o, &saved, &lru, &r);
+	H13_CHECK(r.err_c == 0 && r.err_s == 0 && r.resumed_c && r.resumed_s,
+		"session: the server resumes a ticket one second before 7 days");
+	o.cclock = 1;
+
 	/* A client without a clock offers it; the server's clock says that it
 	   is too old, and the server answers with a full handshake. */
 	saved = first;
@@ -11174,6 +11206,45 @@ test_TLS13_SESSION(void)
 		"session: expired on the server");
 	H13_CHECK(r.obf_age == age_add,
 		"session: no clock, the age that is sent is zero");
+
+	/* A clock is required and missing: no ticket is offered, none is used.
+	   (A new session is made first, with the clocks.) */
+	br_ssl_session_cache_lru_init(&lru, cachebuf, sizeof cachebuf);
+	memset(&saved, 0, sizeof saved);
+	memset(&o, 0, sizeof o);
+	o.clock_req = 1;
+	o.cclock = o.sclock = 1;
+	o.cnow = o.snow = 500;
+	o.salt = 16;
+	sess_run(&o, &saved, &lru, &r);
+	first = saved;
+	o.offer = 1;
+	o.cnow = o.snow = 600;
+	o.salt = 17;
+	sess_run(&o, &saved, &lru, &r);
+	H13_CHECK(r.err_c == 0 && r.err_s == 0 && r.resumed_c && r.resumed_s,
+		"session: with the clock required and given, resumption works");
+	saved = first;
+	o.cclock = 0;
+	o.salt = 18;
+	sess_run(&o, &saved, &lru, &r);
+	H13_CHECK(r.err_c == 0 && r.err_s == 0 && !r.resumed_c && !r.resumed_s,
+		"session: a client that requires a clock and has none offers no ticket");
+	saved = first;
+	o.cclock = 1;
+	o.sclock = 0;
+	o.salt = 19;
+	sess_run(&o, &saved, &lru, &r);
+	H13_CHECK(r.err_c == 0 && r.err_s == 0 && !r.resumed_c && !r.resumed_s,
+		"session: a server that requires a clock and has none does not resume");
+	br_ssl_session_cache_lru_init(&lru, cachebuf, sizeof cachebuf);
+	memset(&saved, 0, sizeof saved);
+	memset(&o, 0, sizeof o);
+	o.cclock = o.sclock = 1;
+	o.cnow = o.snow = 1000;
+	o.salt = 1;
+	sess_run(&o, &saved, &lru, &r);
+	first = saved;
 
 	/* The server's policy changed: full handshake. */
 	saved = first;
@@ -11202,6 +11273,7 @@ test_TLS13_SESSION(void)
 	sess_run(&o, &saved, &lru, &r);
 	H13_CHECK(r.err_c == 0 && r.err_s == 0 && !r.cauth,
 		"session: no client authentication");
+	H13_CHECK(!r.has_hash, "session: no certificate hash without authentication");
 	o.offer = 1;
 	o.salt = 9;
 	sess_run(&o, &saved, &lru, &r);
@@ -11213,12 +11285,18 @@ test_TLS13_SESSION(void)
 	H13_CHECK(r.err_c == 0 && r.err_s == 0 && !r.resumed_c && !r.resumed_s
 		&& r.cauth, "session: a server that asks for certificates does "
 		"a full handshake and gets the client's certificate");
+	H13_CHECK(r.has_hash && r.hash_ok,
+		"session: the certificate of the client is known after a full handshake");
 	/* the session of the authenticated client is resumed, and stays
 	   an authenticated one */
 	o.salt = 11;
 	sess_run(&o, &saved, &lru, &r);
 	H13_CHECK(r.err_c == 0 && r.err_s == 0 && r.resumed_c && r.resumed_s
 		&& r.cauth, "session: authenticated session resumed");
+	/* the server learns who the client is, after a full handshake and after
+	   a resumption (the hash of the client's certificate is in the cache) */
+	H13_CHECK(r.has_hash && r.hash_ok,
+		"session: the certificate of the client is known after a resumption");
 	o.salt = 12;
 	sess_run(&o, &saved, &lru, &r);
 	H13_CHECK(r.err_c == 0 && r.err_s == 0 && r.resumed_c && r.resumed_s
@@ -11737,6 +11815,74 @@ test_TLS13_TAMPER(void)
 	fflush(stdout);
 }
 
+/*
+ * The secret of a session leaves the LRU cache when the session is forgotten,
+ * and the whole storage is wiped on request.
+ */
+static int
+cache_has(const unsigned char *store, size_t len, const unsigned char *pat,
+	size_t plen)
+{
+	size_t u;
+
+	for (u = 0; u + plen <= len; u ++) {
+		if (memcmp(store + u, pat, plen) == 0) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+static void
+test_TLS13_CACHE(void)
+{
+	static unsigned char cachebuf[4096];
+	br_ssl_session_cache_lru lru;
+	br_ssl_session_parameters saved, other;
+	sess_opts o;
+	sess_result r;
+
+	printf("Test TLS 1.3 session cache wiping: ");
+	fflush(stdout);
+	br_ssl_session_cache_lru_init(&lru, cachebuf, sizeof cachebuf);
+	memset(&saved, 0, sizeof saved);
+	memset(&o, 0, sizeof o);
+	o.salt = 120;
+	sess_run(&o, &saved, &lru, &r);
+	H13_CHECK(r.err_c == 0 && r.err_s == 0 && saved.ticket_len == 32,
+		"cache: a session");
+	other = saved;
+	o.salt = 121;
+	memset(&saved, 0, sizeof saved);
+	sess_run(&o, &saved, &lru, &r);
+	H13_CHECK(r.err_c == 0 && r.err_s == 0 && saved.ticket_len == 32
+		&& memcmp(saved.ticket, other.ticket, 32) != 0,
+		"cache: another session");
+	H13_CHECK(cache_has(cachebuf, sizeof cachebuf, other.master_secret, 32)
+		&& cache_has(cachebuf, sizeof cachebuf, saved.master_secret, 32),
+		"cache: both secrets are in the cache");
+	br_ssl_session_cache_lru_forget(&lru, other.ticket);
+	H13_CHECK(!cache_has(cachebuf, sizeof cachebuf, other.master_secret, 32),
+		"cache: a forgotten session leaves no secret in the cache");
+	H13_CHECK(cache_has(cachebuf, sizeof cachebuf, saved.master_secret, 32),
+		"cache: the other session is untouched");
+	/* the forgotten one is not resumed, the other one is */
+	o.offer = 1;
+	o.salt = 122;
+	sess_run(&o, &other, &lru, &r);
+	H13_CHECK(r.err_c == 0 && r.err_s == 0 && !r.resumed_c && !r.resumed_s,
+		"cache: a forgotten session is not resumed");
+	o.salt = 123;
+	sess_run(&o, &saved, &lru, &r);
+	H13_CHECK(r.err_c == 0 && r.err_s == 0 && r.resumed_c && r.resumed_s,
+		"cache: the session that was not forgotten is resumed");
+	br_ssl_session_cache_lru_wipe(&lru);
+	H13_CHECK(all_zero(cachebuf, sizeof cachebuf),
+		"cache: the whole storage is wiped");
+	printf("done.\n");
+	fflush(stdout);
+}
+
 #define STU(x)   { &test_ ## x, #x }
 
 static const struct {
@@ -11763,6 +11909,7 @@ static const struct {
 	STU(TLS13_KEYUPDATE),
 	STU(TLS13_WIPE),
 	STU(TLS13_TAMPER),
+	STU(TLS13_CACHE),
 	STU(SHAKE),
 	STU(HMAC_DRBG),
 	STU(AESCTR_DRBG),

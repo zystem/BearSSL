@@ -224,6 +224,7 @@ br_ssl_engine_tls13_hs_keys(br_ssl_engine_context *cc)
 	int hash_id;
 	size_t hlen, xoff, xlen;
 	unsigned char point[133], th[48];
+	int ret;
 
 	dig = suite_hash(cc, &hash_id);
 	if (dig == NULL) {
@@ -245,8 +246,8 @@ br_ssl_engine_tls13_hs_keys(br_ssl_engine_context *cc)
 	} else {
 		memcpy(point, cc->ecdhe_point, cc->ecdhe_point_len);
 		if (ecdh_shared(cc, point, &xoff, &xlen) != 0) {
-			br_tls13_wipe(point, sizeof point);
-			return BR_ERR_BAD_PARAM;
+			ret = BR_ERR_BAD_PARAM;
+			goto done;
 		}
 	}
 
@@ -254,7 +255,8 @@ br_ssl_engine_tls13_hs_keys(br_ssl_engine_context *cc)
 	 * Transcript hash up to and including the ServerHello.
 	 */
 	if (br_multihash_out(&cc->mhash, hash_id, th) != hlen) {
-		return BR_ERR_BAD_STATE;
+		ret = BR_ERR_BAD_STATE;
+		goto done;
 	}
 	if (cc->tls13_resumed == 2) {
 		/* Resumption: the early secret is made from the PSK. */
@@ -268,9 +270,16 @@ br_ssl_engine_tls13_hs_keys(br_ssl_engine_context *cc)
 	br_tls13_derive_secret(dig, cc->tls13_ks.secret,
 		"s hs traffic", th, cc->tls13_shs);
 	cc->tls13_hlen = (unsigned char)hlen;
+	ret = 0;
+
+	/*
+	 * One exit for every path after the shared secret was copied: the
+	 * copy and the private key are wiped whatever happened.
+	 */
+done:
 	br_tls13_wipe(point, sizeof point);
 	br_tls13_wipe(cc->tls13_priv, sizeof cc->tls13_priv);
-	return 0;
+	return ret;
 }
 
 /* see inner.h */
@@ -723,6 +732,9 @@ br_ssl_client_tls13_psk_prepare(br_ssl_client_context *cc)
 	}
 	hlen = br_digest_size(dig);
 	eng->tls13_obf_age = eng->session.ticket_age_add;
+	if (eng->tls13_clock_req && !eng->tls13_now_set) {
+		return 0;
+	}
 	if (eng->tls13_now_set) {
 		uint32_t age;
 
@@ -906,7 +918,9 @@ br_ssl_server_tls13_psk_lookup(br_ssl_server_context *cc)
 	size_t hlen;
 
 	eng = &cc->eng;
-	if (cc->cache_vtable == NULL) {
+	if (cc->cache_vtable == NULL
+		|| (eng->tls13_clock_req && !eng->tls13_now_set))
+	{
 		return 0;
 	}
 	memset(&tmp, 0, sizeof tmp);
@@ -929,7 +943,7 @@ br_ssl_server_tls13_psk_lookup(br_ssl_server_context *cc)
 		|| (eng->tls13_now_set
 			&& (!tmp.issued_valid
 				|| (uint32_t)(eng->tls13_now - tmp.ticket_issued)
-					> TICKET_LIFETIME))
+					>= TICKET_LIFETIME))
 		|| ((cc->ta_names != NULL || cc->tas != NULL)
 			&& cc->num_tas > 0 && !tmp.cert_authed))
 	{
@@ -937,6 +951,7 @@ br_ssl_server_tls13_psk_lookup(br_ssl_server_context *cc)
 		return 0;
 	}
 	eng->tls13_cauth = tmp.cert_authed;
+	memcpy(eng->tls13_cert_hash, tmp.cert_hash, 32);
 	hlen = (tmp.cipher_suite == 0x1302) ? 48 : 32;
 	memcpy(eng->tls13_psk, tmp.master_secret, hlen);
 	eng->tls13_psk_len = (unsigned char)hlen;
@@ -1025,6 +1040,7 @@ br_ssl_server_tls13_make_ticket(br_ssl_server_context *cc)
 	sp.issued_valid = eng->tls13_now_set;
 	sp.policy_id = cc->tls13_policy_id;
 	sp.cert_authed = eng->tls13_cauth;
+	memcpy(sp.cert_hash, eng->tls13_cert_hash, 32);
 	br_tls13_expand_label(dig, eng->tls13_resm, "resumption",
 		&nonce, 1, sp.master_secret, hlen);
 	(*cc->cache_vtable)->save(cc->cache_vtable, cc, &sp);

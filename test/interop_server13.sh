@@ -37,9 +37,38 @@ mk cp521 ec -pkeyopt ec_paramgen_curve:secp521r1
 mk cec ec -pkeyopt ec_paramgen_curve:prime256v1
 mk crsa rsa:2048
 
+# The logs of a case that failed are kept (in FAILDIR, interop-failed-logs by
+# default) and their last lines are printed, so that a failure that does not
+# come back can still be looked at.
+FAILDIR=${FAILDIR:-interop-failed-logs}
 report() { # name ok
 	cases=$((cases + 1))
-	if [ "$2" = 1 ]; then echo "ok    $1"; else echo "FAIL  $1"; fail=1; fi
+	if [ "$2" = 1 ]; then
+		echo "ok    $1"
+	else
+		echo "FAIL  $1"
+		fail=1
+		d="$FAILDIR/$(echo "$1" | tr -c 'A-Za-z0-9\n' _)"
+		mkdir -p "$d" && cp "$DIR"/*.log "$d"/ 2>/dev/null
+		echo "      logs kept in $d"
+		for l in bs.log p.log gs.log gu.log; do
+			[ -s "$DIR/$l" ] && { echo "      --- $l (last lines)"; tail -n 8 "$DIR/$l" | sed 's/^/      /'; }
+		done
+	fi
+}
+
+# Wait until something listens on a port (the peers need a moment to start);
+# without ss, a fixed pause.
+wait_port() { # port
+	command -v ss >/dev/null || { sleep 1; return 0; }
+	n=0
+	while [ $n -lt 150 ]; do
+		ss -ltn 2>/dev/null | grep -q ":$1 " && return 0
+		sleep 0.1
+		n=$((n + 1))
+	done
+	echo "      nothing listens on port $1 after 15 s"
+	return 1
 }
 
 # A peer is missing: a failure if it is required, else a note at the end.
@@ -55,10 +84,10 @@ command -v go >/dev/null || missing go
 
 # Our server, started with a stdin that stays open and ends with a reply.
 start_server() { # server args
-	( sleep 4; echo "pong-from-bear" ) 2>/dev/null | "$BRSSL" \
+	( sleep 2; echo "pong-from-bear" ) 2>/dev/null | "$BRSSL" \
 		server -p $PORT -vmax tls13 "$@" >"$DIR/bs.log" 2>&1 &
 	SRV=$!
-	sleep 1
+	wait_port $PORT
 }
 stop_server() { kill $SRV >/dev/null 2>&1; { wait; } 2>/dev/null; sleep 1; }
 
@@ -156,7 +185,7 @@ if [ -x "$DIR/goclient" ]; then
 		"$DIR/goserver" -addr 127.0.0.1:$PORT2 -cert "$DIR/$cert.crt" \
 			-key "$DIR/$cert.key" $extra $sa >"$DIR/gs.log" 2>&1 &
 		BG=$!
-		sleep 1
+		wait_port $PORT2
 		( echo ping-from-bear; sleep 1.5 ) | timeout 15 "$BRSSL" client \
 			127.0.0.1:$PORT2 -sni localhost -vmax tls13 \
 			-CA "$DIR/$cert.crt" $ca >"$DIR/p.log" 2>&1
@@ -181,7 +210,7 @@ if command -v gnutls-serv >/dev/null; then
 			--x509certfile "$DIR/$cert.crt" \
 			--x509keyfile "$DIR/$cert.key" $sa >"$DIR/gu.log" 2>&1 &
 		BG=$!
-		sleep 3
+		wait_port $PORT2
 		( echo ping-from-bear; sleep 1.5 ) | timeout 15 "$BRSSL" client \
 			127.0.0.1:$PORT2 -sni localhost -vmax tls13 \
 			-CA "$DIR/$cert.crt" $ca >"$DIR/p.log" 2>&1
@@ -234,7 +263,7 @@ if command -v openssl >/dev/null; then
 		sleep 2 ) 2>/dev/null | "$BRSSL" server -p $PORT -vmax tls13 -ku 2 \
 		-cert "$DIR/ec.crt" -key "$DIR/ec.key" >"$DIR/bs.log" 2>&1 &
 	SRV=$!
-	sleep 1
+	wait_port $PORT
 	( sleep 6 ) | timeout 15 openssl s_client -connect 127.0.0.1:$PORT \
 		-tls1_3 -CAfile "$DIR/ec.crt" >"$DIR/p.log" 2>&1
 	ok=1
@@ -244,7 +273,7 @@ if command -v openssl >/dev/null; then
 	( cd "$DIR" && exec openssl s_server -accept $PORT2 -cert ec.crt \
 		-key ec.key -quiet -rev >srv.log 2>&1 ) &
 	BG=$!
-	sleep 1
+	wait_port $PORT2
 	( sleep 0.5; for i in 1 2 3 4 5 6 7 8; do echo "ku-line-$i"; sleep 0.3; done; \
 		sleep 1 ) | timeout 15 "$BRSSL" client 127.0.0.1:$PORT2 -sni localhost \
 		-vmax tls13 -ku 2 -CA "$DIR/ec.crt" >"$DIR/p.log" 2>&1
@@ -259,7 +288,7 @@ if command -v gnutls-cli >/dev/null; then
 		sleep 2 ) 2>/dev/null | "$BRSSL" server -p $PORT -vmax tls13 -ku 2 \
 		-cert "$DIR/ec.crt" -key "$DIR/ec.key" >"$DIR/bs.log" 2>&1 &
 	SRV=$!
-	sleep 1
+	wait_port $PORT
 	( sleep 6 ) | timeout 15 gnutls-cli --priority "$PRI" -p $PORT localhost \
 		--x509cafile "$DIR/ec.crt" >"$DIR/p.log" 2>&1
 	ok=1
@@ -295,7 +324,7 @@ if command -v openssl >/dev/null; then
 		-key ec.key -www -quiet -Verify 1 -CAfile cp521.crt \
 		-verify_return_error >srv.log 2>&1 ) &
 	BG=$!
-	sleep 1
+	wait_port $PORT2
 	( echo ping-from-bear; sleep 1.5 ) | timeout 15 "$BRSSL" client \
 		127.0.0.1:$PORT2 -sni localhost -vmax tls13 -CA "$DIR/ec.crt" \
 		-cert "$DIR/cp521.crt" -key "$DIR/cp521.key" >"$DIR/p.log" 2>&1
@@ -308,7 +337,7 @@ if command -v openssl >/dev/null; then
 		( cd "$DIR" && exec openssl s_server -accept $PORT2 -cert $cert.crt \
 			-key $cert.key -www -quiet -sigalgs $alg >srv.log 2>&1 ) &
 		BG=$!
-		sleep 1
+		wait_port $PORT2
 		( echo ping-from-bear; sleep 1.5 ) | timeout 15 "$BRSSL" client \
 			127.0.0.1:$PORT2 -sni localhost -vmax tls13 \
 			-CA "$DIR/$cert.crt" >"$DIR/p.log" 2>&1
@@ -334,7 +363,7 @@ if command -v gnutls-cli >/dev/null && command -v gnutls-serv >/dev/null; then
 			--x509certfile "$DIR/$cert.crt" --x509keyfile "$DIR/$cert.key" \
 			>"$DIR/gu.log" 2>&1 &
 		BG=$!
-		sleep 3
+		wait_port $PORT2
 		( echo ping-from-bear; sleep 1.5 ) | timeout 15 "$BRSSL" client \
 			127.0.0.1:$PORT2 -sni localhost -vmax tls13 \
 			-CA "$DIR/$cert.crt" >"$DIR/p.log" 2>&1
@@ -357,7 +386,7 @@ if [ -x "$DIR/goclient" ]; then
 	"$DIR/goserver" -addr 127.0.0.1:$PORT2 -cert "$DIR/p521.crt" \
 		-key "$DIR/p521.key" >"$DIR/gs.log" 2>&1 &
 	BG=$!
-	sleep 1
+	wait_port $PORT2
 	( echo ping-from-bear; sleep 1.5 ) | timeout 15 "$BRSSL" client \
 		127.0.0.1:$PORT2 -sni localhost -vmax tls13 \
 		-CA "$DIR/p521.crt" >"$DIR/p.log" 2>&1
@@ -375,7 +404,7 @@ if [ -f build/libbearssl.a ] && cc -O1 -Isrc -Iinc "$HERE/resume_client.c" \
 		( cd "$DIR" && exec openssl s_server -accept $PORT2 \
 			-cert ec.crt -key ec.key -www -quiet >srv.log 2>&1 ) &
 		BG=$!
-		sleep 1
+		wait_port $PORT2
 		"$DIR/resume_client" 127.0.0.1 $PORT2 >"$DIR/p.log" 2>&1
 		report "bear client resumes a session of the openssl server" $((1 - $?))
 		kill $BG >/dev/null 2>&1; { wait; } 2>/dev/null
@@ -384,7 +413,7 @@ if [ -f build/libbearssl.a ] && cc -O1 -Isrc -Iinc "$HERE/resume_client.c" \
 		"$DIR/goserver" -addr 127.0.0.1:$PORT2 -cert "$DIR/ec.crt" \
 			-key "$DIR/ec.key" >"$DIR/gs.log" 2>&1 &
 		BG=$!
-		sleep 1
+		wait_port $PORT2
 		"$DIR/resume_client" 127.0.0.1 $PORT2 >"$DIR/p.log" 2>&1
 		report "bear client resumes a session of the go server" $((1 - $?))
 		kill $BG >/dev/null 2>&1; { wait; } 2>/dev/null
@@ -394,7 +423,7 @@ if [ -f build/libbearssl.a ] && cc -O1 -Isrc -Iinc "$HERE/resume_client.c" \
 			--x509certfile "$DIR/ec.crt" --x509keyfile "$DIR/ec.key" \
 			>"$DIR/gu.log" 2>&1 &
 		BG=$!
-		sleep 3
+		wait_port $PORT2
 		"$DIR/resume_client" 127.0.0.1 $PORT2 >"$DIR/p.log" 2>&1
 		report "bear client resumes a session of the gnutls server" $((1 - $?))
 		kill $BG >/dev/null 2>&1; { wait; } 2>/dev/null

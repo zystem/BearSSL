@@ -53,6 +53,7 @@
  *   policy              4 bytes (big endian; TLS 1.3: server policy id)
  *   flags               4 bytes (bit 0: client authenticated with a
  *                       certificate; bit 1: 'issued' is valid)
+ *   client cert hash    32 bytes (TLS 1.3: SHA-256 of the client certificate)
  *   list prev           4 bytes (big endian)
  *   list next           4 bytes (big endian)
  *   tree left child     4 bytes (big endian)
@@ -90,12 +91,13 @@
 #define ISSUED_OFF           84
 #define POLICY_OFF           88
 #define FLAGS_OFF            92
-#define LIST_PREV_OFF        96
-#define LIST_NEXT_OFF       100
-#define TREE_LEFT_OFF       104
-#define TREE_RIGHT_OFF      108
+#define CERT_HASH_OFF        96
+#define LIST_PREV_OFF       128
+#define LIST_NEXT_OFF       132
+#define TREE_LEFT_OFF       136
+#define TREE_RIGHT_OFF      140
 
-#define LRU_ENTRY_LEN       112
+#define LRU_ENTRY_LEN       144
 
 #define ADDR_NULL   ((uint32_t)-1)
 
@@ -433,6 +435,7 @@ lru_save(const br_ssl_session_cache_class **ctx,
 	br_enc32be(cc->store + x + POLICY_OFF, params->policy_id);
 	br_enc32be(cc->store + x + FLAGS_OFF,
 		(params->cert_authed ? 1 : 0) | (params->issued_valid ? 2 : 0));
+	memcpy(cc->store + x + CERT_HASH_OFF, params->cert_hash, 32);
 }
 
 static int
@@ -475,6 +478,7 @@ lru_load(const br_ssl_session_cache_class **ctx,
 			& 1) != 0;
 		params->issued_valid = (br_dec32be(cc->store + x + FLAGS_OFF)
 			& 2) != 0;
+		memcpy(params->cert_hash, cc->store + x + CERT_HASH_OFF, 32);
 		if (x != cc->head) {
 			/*
 			 * Found node is not at list head, so move
@@ -550,5 +554,27 @@ void br_ssl_session_cache_lru_forget(
 	addr = find_node(cc, mid, NULL);
 	if (addr != ADDR_NULL) {
 		br_enc16be(cc->store + addr + VERSION_OFF, 0);
+		/*
+		 * The entry stays in the tree (its identifier is the key), but
+		 * the secret that it held goes now, not when the entry is
+		 * reused.
+		 */
+		br_tls13_wipe(cc->store + addr + MASTER_SECRET_OFF,
+			MASTER_SECRET_LEN);
+		br_tls13_wipe(cc->store + addr + CERT_HASH_OFF, 32);
 	}
+}
+
+/* see bearssl_ssl.h */
+void
+br_ssl_session_cache_lru_wipe(br_ssl_session_cache_lru *cc)
+{
+	if (cc->store != NULL) {
+		br_tls13_wipe(cc->store, cc->store_len);
+	}
+	cc->init_done = 0;
+	cc->head = ADDR_NULL;
+	cc->tail = ADDR_NULL;
+	cc->root = ADDR_NULL;
+	cc->store_ptr = 0;
 }

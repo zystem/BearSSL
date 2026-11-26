@@ -23,16 +23,19 @@ The TLS 1.3 suites are in no profile: add them to the list of `br_ssl_engine_set
 | `br_ssl_engine_tls13_resumed(cc)` | new | Non-zero if this connection was resumed with a ticket. |
 | `br_ssl_engine_tls13_ticket_count(cc)` | new | Number of tickets sent (server) or received (client) on this connection. |
 | `br_ssl_engine_set_tls13_time(cc, seconds)` | new | The clock for tickets: a steady time in seconds (differences only). With it a client sends the true age of a ticket and does not offer one older than its lifetime (at most 7 days), and a server does not resume a session older than 7 days. **Without it a ticket does not expire by itself** (the default): it lasts until the server's cache drops it. Call it before each `*_reset()`. |
+| `br_ssl_engine_set_tls13_clock_required(cc, required)` | new | With a non-zero value an engine that was given no clock does not use tickets (a client does not offer one, a server does not resume): a full handshake. Default 0. |
+| `br_ssl_engine_tls13_client_cert_hash(cc, out)` | new | Server: 1 and the SHA-256 of the client's certificate (32 bytes) if the client authenticated itself with a certificate in this handshake or in the one that created the resumed session; the value of a resumed session comes from the cache. 0 otherwise. |
+| `br_ssl_session_cache_lru_wipe(cc)` | new | Overwrites the whole storage of the LRU cache and leaves the cache uninitialised. `br_ssl_session_cache_lru_forget()` now also overwrites the secret of the entry. |
 | `br_ssl_engine_set_tls13_key_update_interval(cc, records)` | new | Change the sending key after this number of records. Default 0: the limit of the cipher (see below). |
 | `br_ssl_server_set_tls13_policy_id(cc, id)` | new | A number stored with each session in the cache; a session is resumed only if it is the same now. Change it when the trust anchors, the need for client certificates or the server certificate change. Default 0. |
-| `br_ssl_engine_context` | grew by 2408 bytes | 3616 to 6024 bytes; the client context 6128, the server context 6536. Rebuild everything that includes the header. |
+| `br_ssl_engine_context` | grew by 2592 bytes | 3616 to 6208 bytes; the client context 6312, the server context 6720. Rebuild everything that includes the header. |
 | `br_ssl_engine_context.rp_stack` | 32 to 48 entries | The handshake code needs a deeper return stack. |
 
 The record size limit extension (RFC 8449) is offered and honoured with TLS 1.3 without a setting.
 
 ## Session parameters (`br_ssl_session_parameters`)
 
-New fields: `ticket_len`, `ticket_age_add`, `ticket_lifetime`, `ticket[BR_TLS13_MAX_TICKET]`, `ticket_issued` and `issued_valid` (the time of the ticket on the clock of `br_ssl_engine_set_tls13_time()`), `policy_id` and `cert_authed` (server: the policy identifier, and whether the client had authenticated itself with a certificate, when the session was created). The entries of `br_ssl_session_cache_lru` are 112 bytes (100 in upstream). With TLS 1.3, `master_secret` holds the resumption secret (as long as the hash of the suite) and `session_id` is not used by the client; a server's ticket is a 32-byte identifier in `session_id`. `br_ssl_client_forget_session()` also clears `ticket_len`. The structure is larger: code that stores it (a file, a database) must be rebuilt, and stored values from before the change are not valid.
+New fields: `ticket_len`, `ticket_age_add`, `ticket_lifetime`, `ticket[BR_TLS13_MAX_TICKET]`, `ticket_issued` and `issued_valid` (the time of the ticket on the clock of `br_ssl_engine_set_tls13_time()`), `policy_id` and `cert_authed` (server: the policy identifier, and whether the client had authenticated itself with a certificate, when the session was created). `cert_hash` (server: the SHA-256 of the client certificate of the session). The entries of `br_ssl_session_cache_lru` are 144 bytes (100 in upstream; 112 in `0.6.1-tls13.1`). With TLS 1.3, `master_secret` holds the resumption secret (as long as the hash of the suite) and `session_id` is not used by the client; a server's ticket is a 32-byte identifier in `session_id`. `br_ssl_client_forget_session()` also clears `ticket_len`. The structure is larger: code that stores it (a file, a database) must be rebuilt, and stored values from before the change are not valid.
 
 ## Status codes
 

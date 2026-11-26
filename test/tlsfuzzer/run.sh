@@ -76,7 +76,14 @@ for n in $GATE; do
 		# and with 16 MB fail now and then (about one run in eight): the
 		# server sends the alert and the python client, which needs minutes
 		# for that much data, sometimes does not read it. The cause was not
-		# found; the probes stay out of the gate.
+		# found; the probes stay out of the gate. Owner: the maintainer
+		# (zystem). The exclusion expires on 2026-12-31: after that date the
+		# script fails until the probes are back in the gate or the
+		# exclusion is renewed with a reason.
+		if [ "$(date +%F)" \> "2026-12-31" ]; then
+			echo "the exclusion of four probes of 'finished' expired on 2026-12-31"
+			fail=1
+		fi
 		run $n \
 			-e "padding - cipher TLS_AES_128_GCM_SHA256, pad_byte 0, pad_left 0, pad_right 196608" \
 			-e "padding - cipher TLS_AES_256_GCM_SHA384, pad_byte 0, pad_left 0, pad_right 196608" \
