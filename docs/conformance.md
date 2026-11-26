@@ -30,6 +30,23 @@ The 1075 that still fail are, as far as they were looked at:
 
 The silent close is how upstream BearSSL treats most errors, in TLS 1.2 as well: it fails the connection and sends an alert only in some cases ([../inc/bearssl_ssl.h](../inc/bearssl_ssl.h), `BR_ERR_SEND_FATAL_ALERT`). RFC 8446 says which alert to send in many of these cases. Sending them everywhere would change a design choice of the library, in particular for the record layer (a bad tag, an empty record, a record that is too long), where the engine cannot write a record once it has failed. This was **not** done. It is the largest group of failures and the first thing to decide if the fork should be strict.
 
+The table and the paragraph above are the state of 2026-11-21. What changed with the alerts:
+
+## Alerts for errors (2026-11-27)
+
+The fork now sends a fatal alert for a TLS 1.3 error in both roles ([reference-api.md](reference-api.md), "Alerts on errors"); TLS 1.2 and older behave as upstream. All 57 scripts again, the same harness, Linux x86-64, gcc 13, before and after the change:
+
+| | Passed | Failed |
+|---|---|---|
+| master before the change | 1853 | 1074 |
+| with the alerts | 2533 | 775 |
+
+(The totals differ because some scripts draw their probes at random or stop early when the first ones fail; `dhe-shared-secret-padding` alone went from 3 probes to 384.) No probe now ends with "Unexpected closure from peer" (232 did before). `keyupdate`, `record-layer-limits`, `empty-alert` and `finished-plaintext` pass and are in the gate of `run.sh`; one `keyupdate` probe is left out of it, because it sends a line in two pieces and the test server, which echoes what it has read, now and then answers the first piece alone. The client role was tested with `testcrypto` (`TLS13_TAMPER`, `TLS13_ALERTS`) and the interop scripts; tlsfuzzer tests a server only.
+
+The scripts found two things that were not about alerts, both now refused with `unexpected_message` (RFC 8446 section 5.1): application data in the middle of a KeyUpdate that came in pieces, and a second KeyUpdate in the same record, after the key had changed.
+
+Seen in what still fails and **not changed**: a ChangeCipherSpec after the handshake is ignored where the script wants an alert (`ccs`, 1); several ChangeCipherSpec records in the packet of the ClientHello end with `protocol_version` (`multiple-ccs-messages`, 4); an empty list of signature algorithms gets `handshake_failure`, not `decode_error` (`signature-algorithms`, 1); two probes of `zero-content-type` during application data. The rest are features that are not implemented (finite-field groups, CCM suites, compression, 0-RTT), the resumption scripts that the test server cannot serve, and scripts **not looked at**.
+
 ## Fixed because of it (2026-11-21)
 
 | Found by | Fault | Fix |
@@ -73,7 +90,7 @@ A second review of the release `0.6.1-tls13.0` plus the fixes, revision `1740f68
 | 2. A policy number and an "authenticated" bit do not say who the client is | The SHA-256 of the client's certificate is kept with the session and restored on resumption (`br_ssl_engine_tls13_client_cert_hash()`); the guide says to keep a cache per trust domain or the domain in the policy identifier, and to change the identifier when a client is revoked | `TLS13_SESSION` (known after a full handshake and after a resumption, not known without authentication); revocation by policy: the policy test of the first review |
 | 3. Forgetting a session left its secret in the cache | `br_ssl_session_cache_lru_forget()` overwrites the secret and the hash; `br_ssl_session_cache_lru_wipe()` overwrites the whole storage | `TLS13_CACHE` (seen to fail with the wipe removed) |
 | 4. One error return skipped the wipe of the local copy of the shared secret | One exit for every path after the copy | by reading; the error cannot be made to happen in a test without a faulty hash table. The object code of the release was not inspected |
-| 5. Alerts, the excluded probes, the interop harness | The interop script keeps and prints the logs of a failed case, waits for a port to listen instead of fixed pauses (three clean runs of the 46 cases afterwards; the earlier failures were not reproduced, so the cause is not known), and the exclusion of the four `finished` probes has an owner and an expiry date after which `run.sh` fails; `style_check.sh` fails if a build file or the release workflow sets `BR_TLS13_FUZZ`; the refusal tests (`TLS13_TAMPER`) run on the build that is released | the scripts. **Not done:** an alert for every TLS 1.3 error in both roles (the record layer still closes without one); the 1.2 parser is not exercised apart from 1.3 |
+| 5. Alerts, the excluded probes, the interop harness | The interop script keeps and prints the logs of a failed case, waits for a port to listen instead of fixed pauses (three clean runs of the 46 cases afterwards; the earlier failures were not reproduced, so the cause is not known), and the exclusion of the four `finished` probes has an owner and an expiry date after which `run.sh` fails; `style_check.sh` fails if a build file or the release workflow sets `BR_TLS13_FUZZ`; the refusal tests (`TLS13_TAMPER`) run on the build that is released | the scripts. **Not done then:** an alert for every TLS 1.3 error in both roles (done on 2026-11-27, see "Alerts for errors"); the 1.2 parser is not exercised apart from 1.3 |
 
 The review also notes that RFC 9846 has replaced RFC 8446: a claim of conformance to the current specification needs a mapping to it, which was **not made**.
 
@@ -106,6 +123,5 @@ The review also notes that RFC 9846 has replaced RFC 8446: a claim of conformanc
 
 - Run the same scripts against the client: tlsfuzzer has no client mode in the scripts used here; a client test needs a scripted server (the unit tests in `test/test_crypto.c` do this for HelloRetryRequest and the downgrade sentinel).
 - BoringSSL and NSS as peers (named in the TLS working group list); wolfSSL and rustls as peers: not built or run.
-- Open from the review: the ticket and the cache have no stateless form; the secrets that the application holds (the resumption secret in a saved `br_ssl_session_parameters`, the copies the application makes) are the application's to wipe; the handshake is written in T0 and has no line or branch figure; ARM, big-endian and 32-bit were not run on the laptop (no cross compiler, emulator or 32-bit libraries); the CI job `portability` runs them on other machines of GitHub (aarch64 and macOS on Apple silicon natively, x86 32 bit, and s390x in an emulator for the big-endian case, a subset of the tests there) and has **not run yet**, so those results are unknown; the object code was inspected for one function only (below).
-- Send `illegal_parameter`, `decode_error` and `unexpected_message` for the remaining parse errors of the ClientHello (the 89 `signature-algorithms` probes and similar): one change in the T0 element reader. It was left out because it changes upstream's behaviour for TLS 1.2 too.
+- Open from the review: the ticket and the cache have no stateless form; the secrets that the application holds (the resumption secret in a saved `br_ssl_session_parameters`, the copies the application makes) are the application's to wipe; the handshake is written in T0 and has no line or branch figure; ARM, big-endian and 32-bit were not run on the laptop (no cross compiler, emulator or 32-bit libraries); the CI job `portability` runs them on other machines of GitHub (aarch64 and macOS on Apple silicon natively, x86 32 bit, and s390x in an emulator for the big-endian case, a subset of the tests there) and passes on the pull requests merged since; the object code was inspected for one function only (below).
 - Keep the table of scripts that fail for a reason we accept in a file and make CI compare it, so that a script that starts to fail is noticed (today only the list `GATE` in `test/tlsfuzzer/run.sh` is checked).

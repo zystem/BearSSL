@@ -1108,8 +1108,9 @@ cc: DEBUG-BLOB ( addr len -- ) {
 		then
 		addr-version_max get16 0x0303 > if
 			server-random-kind 2 >= hrr or
-			if ERR_BAD_VERSION fail then
+			if ERR_BAD_VERSION 47 fail-as then
 		then
+		0 addr-tls13_alerts set8
 	then
 	\ (the tee is kept after a HelloRetryRequest: its bytes are needed)
 	hrr ifnot 0 tls13-tee then

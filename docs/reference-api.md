@@ -41,6 +41,26 @@ New fields: `ticket_len`, `ticket_age_add`, `ticket_lifetime`, `ticket[BR_TLS13_
 
 `BR_ERR_KEY_LIMIT` (32): TLS 1.3, the engine reached the limit of records for one key and could not change the key.
 
+## Alerts on errors
+
+In a TLS 1.3 connection (and, when TLS 1.3 is enabled, before the version is chosen) a failure caused by what the peer sent is reported to the peer with a fatal alert, in both roles. `br_ssl_engine_last_error()` is set at once; the state is then `BR_SSL_SENDREC` until the alert has been taken, and `BR_SSL_CLOSED` after that. A loop that stops on `BR_SSL_CLOSED` and sends when asked (as `br_sslio_*` does) needs no change; a program that drops the connection as soon as the error is set sends no alert, as before. If a record was waiting to be sent, it goes out first and the alert after it. A connection of TLS 1.2 or older behaves as upstream BearSSL does.
+
+| Error | Alert sent |
+|---|---|
+| `BR_ERR_BAD_MAC` | `bad_record_mac` (20); an authentic record with no content type is `unexpected_message`, one with too much content `record_overflow` |
+| `BR_ERR_UNEXPECTED`, `BR_ERR_UNKNOWN_TYPE`, `BR_ERR_BAD_CCS`, `BR_ERR_BAD_HELLO_DONE` | `unexpected_message` (10) |
+| `BR_ERR_TOO_LARGE` | `record_overflow` (22) |
+| `BR_ERR_BAD_PARAM`, `BR_ERR_BAD_LENGTH`, `BR_ERR_BAD_ALERT`, `BR_ERR_BAD_HANDSHAKE`, `BR_ERR_OVERSIZED_ID`, `BR_ERR_LIMIT_EXCEEDED` | `decode_error` (50); a KeyUpdate with an unknown request value is `illegal_parameter`, a record with a length over the limit `record_overflow` |
+| `BR_ERR_BAD_CIPHER_SUITE`, `BR_ERR_BAD_COMPRESSION`, `BR_ERR_BAD_FRAGLEN`, `BR_ERR_BAD_SECRENEG`, `BR_ERR_BAD_SNI`, `BR_ERR_RESUME_MISMATCH`, `BR_ERR_INVALID_ALGORITHM` | `illegal_parameter` (47) |
+| `BR_ERR_EXTRA_EXTENSION` | `unsupported_extension` (110) |
+| `BR_ERR_BAD_FINISHED`, `BR_ERR_BAD_SIGNATURE` | `decrypt_error` (51); a Finished of a wrong length received by a server is `decode_error` |
+| `BR_ERR_BAD_VERSION`, `BR_ERR_UNSUPPORTED_VERSION` | `protocol_version` (70); the downgrade sentinel is `illegal_parameter` |
+| `BR_ERR_WRONG_KEY_USAGE` | `unsupported_certificate` (43) |
+| `BR_ERR_NO_CLIENT_AUTH` | `certificate_required` (116) |
+| `BR_ERR_X509_EXPIRED`, `BR_ERR_X509_NOT_TRUSTED`, other `BR_ERR_X509_*` | `certificate_expired` (45), `unknown_ca` (48), `bad_certificate` (42) |
+| a record of type alert that is not protected when it must be | none |
+| a local failure (`BR_ERR_IO`, `BR_ERR_NO_RANDOM`, `BR_ERR_BAD_STATE`, `BR_ERR_KEY_LIMIT`), a closure, a received alert | none |
+
 ## Keys of the records
 
 A TLS 1.3 engine sends a KeyUpdate (it asks nothing of the peer) when it has sent 2^24 records with one key for AES-GCM, or 2^32 for ChaCha20-Poly1305 (RFC 8446 section 5.5 gives about 2^24.5 for AES-GCM), or earlier with `br_ssl_engine_set_tls13_key_update_interval()`. At 23 726 566 records with AES-GCM (2^40 with ChaCha20-Poly1305) without a change it stops with `BR_ERR_KEY_LIMIT`. The check runs when a record has been sent and the application polls the engine, so it does not need a call of yours. The peer's KeyUpdate is applied as before.

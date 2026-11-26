@@ -1161,6 +1161,24 @@ typedef struct {
 	/* Request context of a TLS 1.3 CertificateRequest (to be echoed). */
 	unsigned char tls13_server;
 	unsigned char tls13_initial;
+
+	/*
+	 * Alerts on errors: 'tls13_alerts' is non-zero while a failure of
+	 * the engine is to be reported to the peer (TLS 1.3 is enabled and
+	 * no older version was chosen); 'tls13_alert' is the description
+	 * to send when the error code alone does not say it (0: none);
+	 * 'tls13_alert_wait' is an alert that is written once the record
+	 * before it has been sent (0: none).
+	 */
+	unsigned char tls13_alerts;
+	unsigned char tls13_alert;
+	unsigned char tls13_alert_wait;
+
+	/*
+	 * Non-zero while a message that came after the handshake is being
+	 * read: nothing else may arrive in the middle of it.
+	 */
+	unsigned char tls13_post_hs;
 	unsigned char tls13_neg;
 	unsigned char tls13_creq_len;
 	unsigned char tls13_creq[255];
@@ -2349,6 +2367,13 @@ unsigned br_ssl_engine_current_state(const br_ssl_engine_context *cc);
  * `br_ssl_server_reset()`. Other status values are "sticky": they
  * remain set, and prevent all I/O activity, until cleared. Only the
  * reset calls clear the error indicator.
+ *
+ * TLS 1.3: when a connection fails because of what the peer sent, the
+ * engine tells the peer with a fatal alert. The error is then set while
+ * the engine is still in the `BR_SSL_SENDREC` state (and in no other):
+ * send those bytes as usual; the engine is `BR_SSL_CLOSED` after them.
+ * This holds for a connection that is TLS 1.3, and, if TLS 1.3 is
+ * enabled, before the version is chosen.
  *
  * \param cc   SSL engine context.
  * \return  0, or a non-zero error code.

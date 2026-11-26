@@ -870,7 +870,7 @@ br_ssl_engine_tls13_wipe(br_ssl_engine_context *cc)
 	if (cc->tls13_in) {
 		br_tls13_wipe(&cc->in, sizeof cc->in);
 	}
-	if (cc->tls13_out) {
+	if (cc->tls13_out && cc->tls13_alert_wait == 0) {
 		br_tls13_wipe(&cc->out, sizeof cc->out);
 	}
 }
