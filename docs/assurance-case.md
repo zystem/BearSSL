@@ -50,4 +50,4 @@ A program that uses this library as [production-checklist.md](production-checkli
 
 ## What is not shown
 
-No independent audit; side channels of the new code not measured; no formal analysis of the handshake; the fuzz runs were not finished at the first and second release, and the newest code was not fuzzed for 24 hours. See [threat-model.md](threat-model.md), "Not covered, or not known".
+No independent audit; side channels of the new code not measured; no formal analysis of the handshake; the fuzz runs were not finished at the first and second release, and no 24 hour run of the newest code has finished. See [threat-model.md](threat-model.md), "Not covered, or not known".
