@@ -41,7 +41,7 @@ The silent close is how upstream BearSSL treats most errors, in TLS 1.2 as well:
 
 ## Fixed because of the review of 2026-11-21
 
-The expert review of this tree ([`SECURITY-REVIEW-2026-11-21.ru.md`](../SECURITY-REVIEW-2026-11-21.ru.md), revision `9f8cded`) named five faults and some smaller ones. Each has a test; for the three session rules, the KeyUpdate and the record length the test was seen to fail with the fix taken out.
+The expert review of this tree ([`SECURITY-REVIEW-2026-11-21.en.md`](../SECURITY-REVIEW-2026-11-21.en.md), revision `9f8cded`) named five faults and some smaller ones. Each has a test; for the three session rules, the KeyUpdate and the record length the test was seen to fail with the fix taken out.
 
 | Finding of the review | Fix | Test |
 |---|---|---|
@@ -62,6 +62,20 @@ The expert review of this tree ([`SECURITY-REVIEW-2026-11-21.ru.md`](../SECURITY
 | The benchmark could print FAILED and exit 0 | It exits 1 | by reading |
 
 **A flaky probe, left out of the gate**: the four probes of `finished` that send a Finished message padded with 196 608 bytes and with about 16 MB (the python client needs minutes for that much data) failed about one run in eight with the first test server, and still about one in ten after the server was changed to read what the client still sends before it closes. The server answers with the alert; the cause on the client side was not found. `test/tlsfuzzer/run.sh` leaves those four probes out (`-e`); the other 38 probes of `finished` pass in every run (more than 30 runs).
+
+### The reassessment of 2026-11-22
+
+A second review of the release `0.6.1-tls13.0` plus the fixes, revision `1740f68` ([`SECURITY-REVIEW-2026-11-22.en.md`](../SECURITY-REVIEW-2026-11-22.en.md)), found the fixes above in place and named five things. What was done (2026-11-22; tests in `testcrypto` unless said otherwise):
+
+| Finding | What was done | Test |
+|---|---|---|
+| 1. The expiry of tickets depends on a clock that the application may not give; the server accepted the exact 7 day boundary and the client refused at the lifetime; the bundled example gave no time | The server refuses at 7 days like the client; `br_ssl_engine_set_tls13_clock_required()` makes an engine without a clock skip tickets; `test/resume_client.c` sets the clock and requires it | `TLS13_SESSION` (the second before and at 7 days on the server, clock required and given, missing on the client, missing on the server) |
+| 2. A policy number and an "authenticated" bit do not say who the client is | The SHA-256 of the client's certificate is kept with the session and restored on resumption (`br_ssl_engine_tls13_client_cert_hash()`); the guide says to keep a cache per trust domain or the domain in the policy identifier, and to change the identifier when a client is revoked | `TLS13_SESSION` (known after a full handshake and after a resumption, not known without authentication); revocation by policy: the policy test of the first review |
+| 3. Forgetting a session left its secret in the cache | `br_ssl_session_cache_lru_forget()` overwrites the secret and the hash; `br_ssl_session_cache_lru_wipe()` overwrites the whole storage | `TLS13_CACHE` (seen to fail with the wipe removed) |
+| 4. One error return skipped the wipe of the local copy of the shared secret | One exit for every path after the copy | by reading; the error cannot be made to happen in a test without a faulty hash table. The object code of the release was not inspected |
+| 5. Alerts, the excluded probes, the interop harness | The interop script keeps and prints the logs of a failed case, waits for a port to listen instead of fixed pauses (three clean runs of the 46 cases afterwards; the earlier failures were not reproduced, so the cause is not known), and the exclusion of the four `finished` probes has an owner and an expiry date after which `run.sh` fails; `style_check.sh` fails if a build file or the release workflow sets `BR_TLS13_FUZZ`; the refusal tests (`TLS13_TAMPER`) run on the build that is released | the scripts. **Not done:** an alert for every TLS 1.3 error in both roles (the record layer still closes without one); the 1.2 parser is not exercised apart from 1.3 |
+
+The review also notes that RFC 9846 has replaced RFC 8446: a claim of conformance to the current specification needs a mapping to it, which was **not made**.
 
 ### Checked afterwards (2026-11-21, Linux x86-64, gcc 13.3, `vm.mmap_rnd_bits` 28)
 
