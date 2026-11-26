@@ -63,6 +63,35 @@ add(stream *s, const void *p, size_t n)
 }
 
 /*
+ * The handshake traffic secrets of the connection. The engine wipes them as
+ * soon as its handshake is over, which can be before the records it wrote
+ * are converted here, so they are copied while one of the two engines still
+ * has them (the other side derives the same values).
+ */
+static unsigned char hs_client[sizeof ((br_ssl_engine_context *)0)->tls13_chs];
+static unsigned char hs_server[sizeof ((br_ssl_engine_context *)0)->tls13_shs];
+
+static void
+keep_secret(unsigned char *dst, const unsigned char *src, size_t len)
+{
+	size_t u;
+
+	for (u = 0; u < len; u ++) {
+		if (src[u] != 0) {
+			memcpy(dst, src, len);
+			return;
+		}
+	}
+}
+
+static void
+keep_hs_secrets(const br_ssl_engine_context *eng)
+{
+	keep_secret(hs_client, eng->tls13_chs, sizeof hs_client);
+	keep_secret(hs_server, eng->tls13_shs, sizeof hs_server);
+}
+
+/*
  * Decryptor of the records that one engine writes: handshake keys first,
  * then application keys (the first record that does not open with the
  * handshake keys switches over).
@@ -97,7 +126,7 @@ try_decrypt(decryptor *d, br_ssl_engine_context *writer, int epoch,
 	int client_writes = !writer->tls13_server;
 
 	if (epoch == 0) {
-		secret = client_writes ? writer->tls13_chs : writer->tls13_shs;
+		secret = client_writes ? hs_client : hs_server;
 	} else {
 		secret = client_writes ? writer->tls13_cap : writer->tls13_sap;
 	}
@@ -241,6 +270,8 @@ run(const char *dir, int num, const uint16_t *suites, int mtls, int hrr,
 
 	memset(&dcl, 0, sizeof dcl);
 	memset(&dsv, 0, sizeof dsv);
+	memset(hs_client, 0, sizeof hs_client);
+	memset(hs_server, 0, sizeof hs_server);
 	br_ssl_client_init_full(&cc, &cxc, ta, 1);
 	br_ssl_server_init_full_ec(&sc, chain, 1, BR_KEYTYPE_EC, &sk);
 	br_x509_knownkey_init_ec(&ckk, &ta[0].pkey.key.ec, BR_KEYTYPE_SIGN);
@@ -295,9 +326,12 @@ run(const char *dir, int num, const uint16_t *suites, int mtls, int hrr,
 				unsigned char *copy = malloc(len);
 
 				memcpy(copy, b, len);
+				keep_hs_secrets(ce);
 				br_ssl_engine_sendrec_ack(ce, len);
+				keep_hs_secrets(ce);
 				convert(&dcl, ce, copy, len, &toserver);
 				feed(se, copy, len);
+				keep_hs_secrets(se);
 				free(copy);
 			}
 			progress = 1;
@@ -308,9 +342,12 @@ run(const char *dir, int num, const uint16_t *suites, int mtls, int hrr,
 				unsigned char *copy = malloc(len);
 
 				memcpy(copy, b, len);
+				keep_hs_secrets(se);
 				br_ssl_engine_sendrec_ack(se, len);
+				keep_hs_secrets(se);
 				convert(&dsv, se, copy, len, &toclient);
 				feed(ce, copy, len);
+				keep_hs_secrets(ce);
 				free(copy);
 			}
 			progress = 1;
