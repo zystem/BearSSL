@@ -871,6 +871,12 @@ typedef struct {
 	unsigned char cert_authed;
 	/** \brief TLS 1.3: non-zero if `ticket_issued` is valid (a clock was set). */
 	unsigned char issued_valid;
+	/**
+	 * \brief TLS 1.3, server: SHA-256 of the certificate (DER) with which
+	 * the client authenticated itself when the session was created (zero if
+	 * `cert_authed` is zero).
+	 */
+	unsigned char cert_hash[32];
 } br_ssl_session_parameters;
 
 #ifndef BR_DOXYGEN_IGNORE
@@ -1135,8 +1141,12 @@ typedef struct {
 	 */
 	uint32_t tls13_now;
 	unsigned char tls13_now_set;
+	unsigned char tls13_clock_req;
 	uint32_t tls13_obf_age;
 	unsigned char tls13_cauth;
+	br_sha256_context tls13_chash;
+	unsigned char tls13_chash_on;
+	unsigned char tls13_cert_hash[32];
 
 	/*
 	 * TLS 1.3 records sent with the current key; the number after which
@@ -2198,6 +2208,56 @@ br_ssl_engine_set_tls13_key_update_interval(br_ssl_engine_context *cc,
 	uint64_t records)
 {
 	cc->tls13_ku_every = records;
+}
+
+/**
+ * \brief Require a clock for the resumption of TLS 1.3 sessions.
+ *
+ * With a non-zero `required`, an engine that was not given the time
+ * (`br_ssl_engine_set_tls13_time()`) does not use sessions: a client does not
+ * offer its ticket and a server does not resume a session, so the connection
+ * has a full handshake. Use it when a ticket must not live beyond its
+ * lifetime and a clock may be missing (a device that has not got the time
+ * yet). The default is 0: without a clock a ticket does not expire by itself.
+ * It is not reset by `*_reset()`.
+ *
+ * \param cc         engine context.
+ * \param required   non-zero to require a clock.
+ */
+static inline void
+br_ssl_engine_set_tls13_clock_required(br_ssl_engine_context *cc,
+	int required)
+{
+	cc->tls13_clock_req = (unsigned char)(required != 0);
+}
+
+/**
+ * \brief The certificate with which the client authenticated itself
+ * (TLS 1.3, server).
+ *
+ * If the client proved its identity with a certificate, in this handshake or
+ * in the handshake that created the session that it resumed, the SHA-256
+ * hash of the DER encoding of that certificate (the first one of its chain)
+ * is written in `out` (32 bytes) and 1 is returned; otherwise 0 is returned
+ * and `out` is not changed. After a resumption the value comes from the
+ * server's cache, not from the client: a program that decides by the
+ * identity of the client reads it here after every handshake, resumed or not,
+ * and does not need a full handshake for it. Call it when the handshake is
+ * complete.
+ *
+ * \param cc    server engine context.
+ * \param out   output buffer (32 bytes).
+ * \return  1 if the client was authenticated with a certificate, else 0.
+ */
+static inline int
+br_ssl_engine_tls13_client_cert_hash(const br_ssl_engine_context *cc,
+	unsigned char *out)
+{
+	if (!cc->tls13_cauth) {
+		return 0;
+	}
+	memcpy(out, cc->tls13_cert_hash, 32);
+	return 1;
 }
 
 static inline unsigned
@@ -3684,7 +3744,7 @@ struct br_ssl_session_cache_class_ {
  * \brief Context for a basic cache system.
  *
  * The system stores session parameters in a buffer provided at
- * initialisation time. Each entry uses exactly 112 bytes, and
+ * initialisation time. Each entry uses exactly 144 bytes, and
  * buffer sizes up to 4294967295 bytes are supported.
  *
  * Entries are evicted with a LRU (Least Recently Used) policy. A
@@ -3712,7 +3772,7 @@ typedef struct {
  *
  * The provided storage space must remain valid as long as the cache
  * is used. Arbitrary lengths are supported, up to 4294967295 bytes;
- * each entry uses up exactly 112 bytes.
+ * each entry uses up exactly 144 bytes.
  *
  * \param cc          session cache context.
  * \param store       storage space for cached entries.
@@ -3726,13 +3786,30 @@ void br_ssl_session_cache_lru_init(br_ssl_session_cache_lru *cc,
  *
  * The session cache context must have been initialised. The entry
  * with the provided session ID (of exactly 32 bytes) is looked for
- * in the cache; if located, it is disabled.
+ * in the cache; if located, it is disabled and its secret (the master
+ * secret or, in TLS 1.3, the resumption secret) and the hash of the client
+ * certificate are overwritten with zeros at once.
  *
  * \param cc   session cache context.
  * \param id   session ID to forget.
  */
 void br_ssl_session_cache_lru_forget(
 	br_ssl_session_cache_lru *cc, const unsigned char *id);
+
+/**
+ * \brief Wipe an LRU session cache.
+ *
+ * All the storage of the cache (`store_len` bytes given to
+ * `br_ssl_session_cache_lru_init()`) is overwritten with zeros, with writes
+ * that the compiler does not remove, and the cache becomes uninitialised:
+ * it is empty, and a call of `br_ssl_session_cache_lru_init()` is needed to
+ * use it again. Call it before the storage is released or reused, for
+ * example when a trust domain is closed or at the end of the program; the
+ * storage holds the secrets of the sessions until it is overwritten.
+ *
+ * \param cc   session cache context.
+ */
+void br_ssl_session_cache_lru_wipe(br_ssl_session_cache_lru *cc);
 
 /**
  * \brief Context structure for a SSL server.

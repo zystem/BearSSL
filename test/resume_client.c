@@ -12,6 +12,7 @@
  * the second connection resumed.
  */
 #include <stdio.h>
+#include <time.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -163,6 +164,10 @@ main(int argc, char **argv)
 		if (round > 0) {
 			br_ssl_engine_set_session_parameters(eng, &saved);
 		}
+		/* the clock for the age of the ticket; without one a ticket is not
+		   used at all (the connection has a full handshake) */
+		br_ssl_engine_set_tls13_clock_required(&cc.eng, 1);
+		br_ssl_engine_set_tls13_time(&cc.eng, (uint32_t)time(NULL));
 		br_ssl_client_reset(&cc, "localhost", round > 0);
 		br_sslio_init(&ioc, eng, sock_read, &fd, sock_write, &fd);
 		br_sslio_write_all(&ioc, "GET / HTTP/1.0\r\n\r\n", 18);

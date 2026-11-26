@@ -28,5 +28,11 @@ for f in $(git ls-files); do
 		echo "$f: binary file tracked"; fail=1
 	fi
 done
+# the test-only bypass of the cryptographic checks (BR_TLS13_FUZZ) must not be
+# switched on by the build files or the workflows that build the release
+if git grep -n BR_TLS13_FUZZ -- Makefile mk conf .github/workflows/ci.yml \
+	.github/workflows/release.yml | grep .; then
+	echo "BR_TLS13_FUZZ is set in a build file of the release"; fail=1
+fi
 [ $fail -eq 0 ] && echo "style: ok"
 exit $fail

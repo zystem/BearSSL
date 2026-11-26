@@ -70,7 +70,7 @@ Records
   ChaCha20-Poly1305      16384 byte records:   159.5 MB/s (protect + unprotect)
 ```
 
-What it shows: TLS 1.3 needs about 130 bytes more stack than TLS 1.2 for the deepest call (the figure includes the frames of the test program, under 1 KiB), and the engine context is larger by the TLS 1.3 state (the resumption ticket, the secrets, the counters). The record speed is that of the constant-time software AES (`aes_ct64`, the portable default) and of the portable ChaCha20; AES-NI and the CLMUL hash would be faster and are not used here (the program selects the portable code on purpose, so that the figures can be compared with other machines). The text sizes of the TLS 1.3 files at `-Os`: `ssl_tls13_hs.o` 8857 bytes, `ssl_tls13_ks.o` 1981, `ssl_rec13_gcm.o` 1554, `ssl_rec13_chapol.o` 983, and the generated handshake `ssl_hs_client.o` 13 526 and `ssl_hs_server.o` 14 198 (both include TLS 1.2). **Not measured**: the stack with RSA keys or with the whole chain validation of a long chain, the memory of a server with many connections, a gRPC stream with key updates, speed on an ARM or embedded core (only printed by CI), and the time of a resumption handshake.
+The figures above are of the revision of that day; the contexts have grown since (6208, 6312 and 6720 bytes for the engine, client and server contexts: the hash of the client certificate and a SHA-256 context were added). What it shows: TLS 1.3 needs about 130 bytes more stack than TLS 1.2 for the deepest call (the figure includes the frames of the test program, under 1 KiB), and the engine context is larger by the TLS 1.3 state (the resumption ticket, the secrets, the counters). The record speed is that of the constant-time software AES (`aes_ct64`, the portable default) and of the portable ChaCha20; AES-NI and the CLMUL hash would be faster and are not used here (the program selects the portable code on purpose, so that the figures can be compared with other machines). The text sizes of the TLS 1.3 files at `-Os`: `ssl_tls13_hs.o` 8857 bytes, `ssl_tls13_ks.o` 1981, `ssl_rec13_gcm.o` 1554, `ssl_rec13_chapol.o` 983, and the generated handshake `ssl_hs_client.o` 13 526 and `ssl_hs_server.o` 14 198 (both include TLS 1.2). **Not measured**: the stack with RSA keys or with the whole chain validation of a long chain, the memory of a server with many connections, a gRPC stream with key updates, speed on an ARM or embedded core (only printed by CI), and the time of a resumption handshake.
 
 ## Sanitizers
 
@@ -95,7 +95,7 @@ So the gate "24 h without a finding" is met for the server (two machines) and fo
 | `libbearssl.a` | 1 027 992 B | 1 075 300 B |
 | `client_basic` text (`-Os`, `--gc-sections`) | 116 625 B | 130 859 B (+12.2 %) |
 | `server_basic` text | 111 839 B | 125 647 B (+12.3 %) |
-| engine context | 3616 B | 6024 B |
+| engine context | 3616 B | 6208 B (6024 B in `0.6.1-tls13.1`) |
 | TLS 1.2 handshake, ECDHE-ECDSA-AES-128-GCM, 1000 runs | 1.334 ms | 1.334 ms |
 | TLS 1.3 handshake, AES-128-GCM | not available | 1.086 ms (client 0.736, server 0.339) |
 | TLS 1.2 with client authentication | 2.07 ms | 2.07 ms |

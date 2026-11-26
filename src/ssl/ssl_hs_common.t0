@@ -314,6 +314,29 @@ cc: tls13-keygen ( -- len ) {
 	T0_PUSH((uint32_t)br_ssl_engine_tls13_keygen(ENG));
 }
 
+\ The hash of the client's certificate (TLS 1.3 server): started with the
+\ chain, fed with the bytes of the first certificate, closed at its end.
+cc: cert-hash-chain ( -- ) {
+	br_sha256_init(&ENG->tls13_chash);
+	ENG->tls13_chash_on = 1;
+	memset(ENG->tls13_cert_hash, 0, sizeof ENG->tls13_cert_hash);
+}
+
+cc: cert-hash-feed ( len -- ) {
+	size_t len = T0_POP();
+
+	if (ENG->tls13_chash_on) {
+		br_sha256_update(&ENG->tls13_chash, ENG->pad, len);
+	}
+}
+
+cc: cert-hash-cert-end ( -- ) {
+	if (ENG->tls13_chash_on) {
+		br_sha256_out(&ENG->tls13_chash, ENG->tls13_cert_hash);
+		ENG->tls13_chash_on = 0;
+	}
+}
+
 \ Server: compute and check the shared secret from the client's key share
 \ (before the ServerHello is sent); returns 0 or an error code.
 cc: tls13-srv-ecdh ( -- err ) {

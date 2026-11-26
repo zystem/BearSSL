@@ -8,3 +8,4 @@
 /srv.pid
 /build-fuzz*/
 /build-cov/
+/interop-failed-logs/
