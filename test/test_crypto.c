@@ -11734,6 +11734,9 @@ test_TLS13_TAMPER(void)
 						H13_CHECK((dir == 0 ? es : ec) == BR_ERR_BAD_MAC
 							&& got < 2,
 							"tamper: a changed record is refused");
+						H13_CHECK((dir == 0 ? ec : es)
+							== BR_ERR_RECV_FATAL_ALERT + 20,
+							"tamper: the sender is told bad_record_mac");
 					}
 				}
 			}
@@ -11783,7 +11786,13 @@ test_TLS13_TAMPER(void)
 			if (which == 0) {
 				H13_CHECK(br_ssl_engine_last_error(ce) == BR_ERR_BAD_FINISHED,
 					"tamper: a wrong server Finished is refused");
+				H13_CHECK(br_ssl_engine_last_error(se)
+					== BR_ERR_RECV_FATAL_ALERT + 51,
+					"tamper: the server is told decrypt_error");
 			} else {
+				H13_CHECK(br_ssl_engine_last_error(ce)
+					== BR_ERR_RECV_FATAL_ALERT + 51,
+					"tamper: the client is told decrypt_error");
 				H13_CHECK(br_ssl_engine_last_error(se)
 					== BR_ERR_BAD_FINISHED
 					|| br_ssl_engine_last_error(se)
@@ -11800,7 +11809,8 @@ test_TLS13_TAMPER(void)
 		o.wrong_skey = 1;
 		o.salt = (unsigned char)(90 + suite);
 		got = tamper_run(&o, 0, 1000, 0, &hit, &ec, &es);
-		H13_CHECK(got == 0 && ec == BR_ERR_BAD_SIGNATURE,
+		H13_CHECK(got == 0 && ec == BR_ERR_BAD_SIGNATURE
+			&& es == BR_ERR_RECV_FATAL_ALERT + 51,
 			"tamper: a server signature that does not verify is refused");
 		memset(&o, 0, sizeof o);
 		o.suite = suites[suite];
@@ -11808,7 +11818,8 @@ test_TLS13_TAMPER(void)
 		o.wrong_ckey = 1;
 		o.salt = (unsigned char)(100 + suite);
 		got = tamper_run(&o, 0, 1000, 0, &hit, &ec, &es);
-		H13_CHECK(got < 2 && es == BR_ERR_BAD_SIGNATURE,
+		H13_CHECK(got < 2 && es == BR_ERR_BAD_SIGNATURE
+			&& ec == BR_ERR_RECV_FATAL_ALERT + 51,
 			"tamper: a client signature that does not verify is refused");
 	}
 	printf("done.\n");
@@ -11831,6 +11842,244 @@ cache_has(const unsigned char *store, size_t len, const unsigned char *pat,
 		}
 	}
 	return 0;
+}
+
+/*
+ * Give 'len' bytes to an engine that is waiting for a record, then collect
+ * what it has to send, one byte at a time. Returned value is the number of
+ * bytes collected. While a failed engine still has bytes to send it offers
+ * nothing else.
+ */
+static size_t
+alert_exchange(br_ssl_engine_context *eng, const unsigned char *in,
+	size_t len, unsigned char *out, size_t out_max)
+{
+	size_t off = 0, n = 0, bl;
+	unsigned char *b;
+
+	while (off < len) {
+		size_t k;
+
+		b = br_ssl_engine_recvrec_buf(eng, &bl);
+		if (b == NULL) {
+			break;
+		}
+		k = len - off < bl ? len - off : bl;
+		memcpy(b, in + off, k);
+		br_ssl_engine_recvrec_ack(eng, k);
+		off += k;
+	}
+	while ((b = br_ssl_engine_sendrec_buf(eng, &bl)) != NULL && n < out_max) {
+		if (br_ssl_engine_last_error(eng) != 0) {
+			H13_CHECK(br_ssl_engine_current_state(eng) == BR_SSL_SENDREC,
+				"alerts: a failed engine only sends");
+			br_ssl_engine_close(eng);
+			br_ssl_engine_flush(eng, 1);
+		}
+		out[n ++] = b[0];
+		br_ssl_engine_sendrec_ack(eng, 1);
+	}
+	return n;
+}
+
+/*
+ * Give the server one record made with the sending key of the client, with
+ * any content and type.
+ */
+static void
+inject_record(br_ssl_engine_context *ce, br_ssl_engine_context *se,
+	int type, const void *data, size_t len)
+{
+	unsigned char buf[256], *rec;
+	size_t rlen = len, off = 0;
+
+	memcpy(buf + 64, data, len);
+	rec = ce->out.vtable13->encrypt(&ce->out.vtable13, type,
+		buf + 64, &rlen);
+	while (off < rlen) {
+		unsigned char *rb;
+		size_t bl, k;
+
+		rb = br_ssl_engine_recvrec_buf(se, &bl);
+		if (rb == NULL) {
+			break;
+		}
+		k = rlen - off < bl ? rlen - off : bl;
+		memcpy(rb, rec + off, k);
+		br_ssl_engine_recvrec_ack(se, k);
+		off += k;
+	}
+}
+
+/*
+ * Messages after the handshake: a KeyUpdate may come in pieces, but
+ * nothing may come in the middle of it or after it in the same record.
+ */
+static void
+test_alerts_post_handshake(void)
+{
+	/* two KeyUpdate messages that ask for nothing */
+	static const unsigned char ku2[] = {
+		24, 0, 0, 1, 0, 24, 0, 0, 1, 0
+	};
+	static const unsigned char ku_bad[] = { 24, 0, 0, 1, 2 };
+	static unsigned char cachebuf[4096];
+	br_ssl_session_cache_lru lru;
+	br_ssl_session_parameters saved;
+	br_ssl_engine_context *ce, *se;
+	sess_opts o;
+	int k, want;
+
+	for (k = 0; k < 4; k ++) {
+		br_ssl_session_cache_lru_init(&lru, cachebuf, sizeof cachebuf);
+		memset(&saved, 0, sizeof saved);
+		memset(&o, 0, sizeof o);
+		o.salt = (unsigned char)(150 + k);
+		sess_setup(&o, &saved, &lru, &ce, &se);
+		loop_pump(ce, se);
+		H13_CHECK(br_ssl_engine_last_error(se) == 0,
+			"alerts: connected");
+		want = 0;
+		switch (k) {
+		case 0:
+			/* in two pieces: accepted */
+			inject_record(ce, se, 22, ku2, 2);
+			inject_record(ce, se, 22, ku2 + 2, 3);
+			break;
+		case 1:
+			/* application data between the pieces */
+			inject_record(ce, se, 22, ku2, 2);
+			inject_record(ce, se, 23, "data", 4);
+			want = BR_ERR_UNEXPECTED;
+			break;
+		case 2:
+			inject_record(ce, se, 22, ku2, sizeof ku2);
+			want = BR_ERR_UNEXPECTED;
+			break;
+		default:
+			inject_record(ce, se, 22, ku_bad, sizeof ku_bad);
+			want = BR_ERR_BAD_PARAM;
+			break;
+		}
+		H13_CHECK(br_ssl_engine_last_error(se) == want,
+			"alerts: a message after the handshake");
+		if (want != 0) {
+			loop_pump(ce, se);
+			H13_CHECK(br_ssl_engine_last_error(ce)
+				== BR_ERR_RECV_FATAL_ALERT
+				+ (k == 3 ? 47 : 10),
+				"alerts: the client is told");
+		}
+	}
+}
+
+static void
+test_TLS13_ALERTS(void)
+{
+	/* a ServerHello where a ClientHello belongs, and a Finished where a
+	   ServerHello belongs */
+	static const unsigned char to_server[] = {
+		0x16, 0x03, 0x03, 0x00, 0x04, 0x02, 0x00, 0x00, 0x00
+	};
+	static const unsigned char to_client[] = {
+		0x16, 0x03, 0x03, 0x00, 0x04, 0x14, 0x00, 0x00, 0x00
+	};
+	/* a record of a protocol that is not TLS */
+	static const unsigned char not_tls[] = { 0x16, 0x02, 0x00, 0x00, 0x01 };
+	static unsigned char cachebuf[4096];
+	br_ssl_session_cache_lru lru;
+	br_ssl_session_parameters saved;
+	br_ssl_engine_context *ce, *se, *eng;
+	unsigned char out[2048];
+	sess_opts o;
+	size_t n, bl;
+	int role, max13, k;
+
+	printf("Test TLS 1.3 alerts: ");
+	fflush(stdout);
+	for (role = 0; role < 2; role ++) {
+		for (max13 = 0; max13 < 2; max13 ++) {
+			for (k = 0; k < 2; k ++) {
+				const unsigned char *in;
+				size_t inlen;
+				int err, alert;
+
+				br_ssl_session_cache_lru_init(&lru, cachebuf,
+					sizeof cachebuf);
+				memset(&saved, 0, sizeof saved);
+				memset(&o, 0, sizeof o);
+				o.salt = (unsigned char)(120 + role * 4 + max13 * 2 + k);
+				sess_setup(&o, &saved, &lru, &ce, &se);
+				eng = role == 0 ? se : ce;
+				br_ssl_engine_set_versions(eng, BR_TLS12,
+					max13 ? BR_TLS13 : BR_TLS12);
+				if (role == 0) {
+					br_ssl_server_reset((br_ssl_server_context *)(void *)se);
+				} else {
+					br_ssl_client_reset((br_ssl_client_context *)(void *)ce,
+						"localhost", 0);
+					/* the ClientHello goes out first */
+					while (br_ssl_engine_sendrec_buf(ce, &bl) != NULL) {
+						br_ssl_engine_sendrec_ack(ce, bl);
+					}
+				}
+				if (k == 0) {
+					in = role == 0 ? to_server : to_client;
+					inlen = sizeof to_server;
+					err = BR_ERR_UNEXPECTED;
+					alert = 10;
+				} else {
+					in = not_tls;
+					inlen = sizeof not_tls;
+					err = BR_ERR_UNSUPPORTED_VERSION;
+					alert = 70;
+				}
+				n = alert_exchange(eng, in, inlen, out, sizeof out);
+				H13_CHECK(br_ssl_engine_last_error(eng) == err,
+					"alerts: the error");
+				H13_CHECK(br_ssl_engine_current_state(eng) == BR_SSL_CLOSED,
+					"alerts: closed in the end");
+				if (max13) {
+					H13_CHECK(n == 7 && out[0] == 21 && out[1] == 3
+						&& out[3] == 0 && out[4] == 2 && out[5] == 2
+						&& out[6] == alert,
+						"alerts: a fatal alert is sent");
+				} else {
+					H13_CHECK(n == 0,
+						"alerts: nothing new without TLS 1.3");
+				}
+			}
+		}
+	}
+
+	/* a transport error while the alert waits closes the engine at once */
+	br_ssl_session_cache_lru_init(&lru, cachebuf, sizeof cachebuf);
+	memset(&saved, 0, sizeof saved);
+	memset(&o, 0, sizeof o);
+	o.salt = 140;
+	sess_setup(&o, &saved, &lru, &ce, &se);
+	{
+		size_t u;
+
+		for (u = 0; u < sizeof to_server; u ++) {
+			unsigned char *b = br_ssl_engine_recvrec_buf(se, &bl);
+
+			if (b == NULL) {
+				break;
+			}
+			b[0] = to_server[u];
+			br_ssl_engine_recvrec_ack(se, 1);
+		}
+	}
+	H13_CHECK(br_ssl_engine_current_state(se) == BR_SSL_SENDREC,
+		"alerts: the alert waits");
+	br_ssl_engine_fail(se, BR_ERR_IO);
+	H13_CHECK(br_ssl_engine_current_state(se) == BR_SSL_CLOSED
+		&& br_ssl_engine_last_error(se) == BR_ERR_UNEXPECTED,
+		"alerts: closed, the first error is kept");
+	test_alerts_post_handshake();
+	printf("done.\n");
+	fflush(stdout);
 }
 
 static void
@@ -11910,6 +12159,7 @@ static const struct {
 	STU(TLS13_WIPE),
 	STU(TLS13_TAMPER),
 	STU(TLS13_CACHE),
+	STU(TLS13_ALERTS),
 	STU(SHAKE),
 	STU(HMAC_DRBG),
 	STU(AESCTR_DRBG),

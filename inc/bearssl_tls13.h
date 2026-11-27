@@ -278,7 +278,10 @@ struct br_sslrec13_in_class_ {
 	 *
 	 * `NULL` is returned if the tag is wrong, if the cleartext has no
 	 * non-zero byte (no inner type), or if the content is longer than
-	 * 16384 bytes. The caller must then send an alert and close.
+	 * 16384 bytes. The caller must then send an alert and close. For a
+	 * record whose tag is right, `*inner_type` is then set to -1 (no
+	 * inner type) or -2 (content too long); it is not written when the
+	 * tag is wrong.
 	 *
 	 * \param ctx          decryption engine context.
 	 * \param payload      address of the encrypted payload.

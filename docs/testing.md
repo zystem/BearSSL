@@ -15,6 +15,7 @@ Linux 6.8 x86-64, gcc 13.3 and clang 18, OpenSSL 3.0.13, GnuTLS (`gnutls-cli`/`g
 | `TLS13_HS`, `TLS13_REPLAY` | client handshake against RFC 8448 (client side replayed byte for byte) | same |
 | `TLS13_HRR` | RFC 8448 HelloRetryRequest trace, refusals, downgrade sentinels | same |
 | `TLS13_LOOPBACK` | client against server in one process: 3 suites, with and without client authentication, with HelloRetryRequest, resumption (full, resumed, resumed again, forgotten ticket, wrong PSK) | same |
+| `TLS13_ALERTS` | the alert that an engine sends for an error, in both roles, before and after the keys; none without TLS 1.3; the state while the alert waits; a KeyUpdate in pieces, with data in the middle, twice in one record, with a bad value | 2026-11-27 |
 
 A test of the client against the server cannot find a label that both sides get wrong; the independent peers below did that job.
 
@@ -76,6 +77,8 @@ The figures above are of the revision of that day; the contexts have grown since
 
 AddressSanitizer + UndefinedBehaviorSanitizer (alignment and function-type checks off; upstream loads unaligned words by design and fills its vtables with function pointer casts) on the unit tests and on the interop scripts: clean. An ASan binary built with an old libasan crashes at start now and then when `/proc/sys/vm/mmap_rnd_bits` is above 28; the runs here had it at 28 or checked it first. Alignment check: not run.
 
+Run on 2026-11-27 after the alerts for TLS 1.3 errors ([conformance.md](conformance.md)), Linux x86-64: `testcrypto all` and `testx509`, also under AddressSanitizer + UndefinedBehaviorSanitizer (clang 18, exit 0); `interop_openssl13.sh`; `interop_server13.sh`, 46 cases; `tlsfuzzer/run.sh` three times (ok); both fuzz targets for 2 minutes with 4 workers each (no artifact).
+
 ## Fuzzing
 
 libFuzzer (clang 18, ASan + UBSan), client and server engines, build flag `BR_TLS13_FUZZ` (cryptographic checks off), seeds made by running a client and a server against each other (`test/fuzz`). A 10-minute trial run of about 4.5 million executions found no crash. The seed generator found a real bug (HelloRetryRequest with `renegotiation_info`), now fixed. **The 24 hour runs of 2026-11-20 and what they were** (read on 2026-11-21 16:00 from the machines; code of commit `e7a3fe6` for the first two and `f08786e` for the third, both before the fixes of [conformance.md](conformance.md)):
@@ -94,7 +97,7 @@ So the gate "24 h without a finding" is met for the server (two machines) and fo
 
 The same commit `8af7ae2` broke the seed generator (`test/fuzz/mkseeds.sh` stopped with "cannot open a record", because it read the handshake secrets after the engine had wiped them), so the weekly `fuzz.yml` run of 2026-11-22 failed before it fuzzed. Fixed on 2026-11-26; the CI job `build` now makes the seeds, so a pull request that breaks them fails.
 
-**Running**: the code of `src` and `inc` of commit `23a719e` (all the changes above), 192.168.100.4, `test/fuzz/run.sh` (each target has its own logs), 8 workers per target, `nice 19`, 86 400 s, started 2026-11-26 23:32 (+02:00) with 16 new seeds per target and the corpus of the run of `0fa53ee`. **Its result is not known yet.**
+**Running**: the code of `src` and `inc` of commit `23a719e` (all the changes above), 192.168.100.4, `test/fuzz/run.sh` (each target has its own logs), 8 workers per target, `nice 19`, 86 400 s, started 2026-11-26 23:32 (+02:00) with 16 new seeds per target and the corpus of the run of `0fa53ee`. **Its result is not known yet.** The alerts of 2026-11-27 are newer than the code of this run.
 
 ## Size and speed (2026-11-20, one machine)
 

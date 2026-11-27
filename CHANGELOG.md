@@ -4,6 +4,10 @@ Changes against upstream BearSSL `7bea48e`. Dates 2026. Versions are `X.Y.Z-tls1
 
 ## Unreleased
 
+### Changed (2026-11-27): TLS 1.3 errors are told to the peer
+- In both roles a TLS 1.3 connection that fails because of what the peer sent now sends a fatal alert (before, most failures closed the transport in silence). The error is set while the state is still `BR_SSL_SENDREC`; the engine is closed once the alert has been taken ([docs/reference-api.md](docs/reference-api.md), "Alerts on errors"). A program that treats a set error as "closed" keeps working and sends no alert. TLS 1.2 and older are not changed. The context has four more bytes of state: rebuild dependent code.
+- A server and a client now refuse (`unexpected_message`) application data in the middle of a message sent after the handshake, and data after a KeyUpdate in the same record (RFC 8446 section 5.1); both were accepted before.
+
 ### Fixed (2026-11-22, the reassessment of that day: [docs/conformance.md](docs/conformance.md))
 - A server refuses a ticket at exactly 7 days, like a client; `br_ssl_engine_set_tls13_clock_required()` skips tickets when there is no clock; `test/resume_client.c` sets the clock.
 - The SHA-256 of the client's certificate is kept with a TLS 1.3 session (`br_ssl_engine_tls13_client_cert_hash()`), so a program that needs the identity of the client has it after a resumption.

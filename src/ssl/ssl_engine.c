@@ -282,16 +282,134 @@
 #define MAX_OUT_OVERHEAD    85
 #define MAX_IN_OVERHEAD    325
 
+static void make_ready_out(br_ssl_engine_context *rc);
+static void sendpld_flush(br_ssl_engine_context *rc, int force);
+
+/*
+ * The alert that tells the peer about a local error (RFC 8446, section 6),
+ * or 0 for an error that is not the peer's to know (a closure, an alert
+ * that was received or already sent, an I/O or a local failure).
+ */
+static int
+tls13_alert_for(int err)
+{
+	switch (err) {
+	case BR_ERR_UNSUPPORTED_VERSION:
+	case BR_ERR_BAD_VERSION:
+		return BR_ALERT_PROTOCOL_VERSION;
+	case BR_ERR_BAD_MAC:
+		return BR_ALERT_BAD_RECORD_MAC;
+	case BR_ERR_TOO_LARGE:
+		return BR_ALERT_RECORD_OVERFLOW;
+	case BR_ERR_UNKNOWN_TYPE:
+	case BR_ERR_UNEXPECTED:
+	case BR_ERR_BAD_CCS:
+	case BR_ERR_BAD_HELLO_DONE:
+		return BR_ALERT_UNEXPECTED_MESSAGE;
+	case BR_ERR_BAD_PARAM:
+	case BR_ERR_BAD_LENGTH:
+	case BR_ERR_BAD_ALERT:
+	case BR_ERR_BAD_HANDSHAKE:
+	case BR_ERR_OVERSIZED_ID:
+	case BR_ERR_LIMIT_EXCEEDED:
+		return BR_ALERT_DECODE_ERROR;
+	case BR_ERR_BAD_CIPHER_SUITE:
+	case BR_ERR_BAD_COMPRESSION:
+	case BR_ERR_BAD_FRAGLEN:
+	case BR_ERR_BAD_SECRENEG:
+	case BR_ERR_BAD_SNI:
+	case BR_ERR_RESUME_MISMATCH:
+	case BR_ERR_INVALID_ALGORITHM:
+		return BR_ALERT_ILLEGAL_PARAMETER;
+	case BR_ERR_EXTRA_EXTENSION:
+		return BR_ALERT_UNSUPPORTED_EXTENSION;
+	case BR_ERR_BAD_FINISHED:
+	case BR_ERR_BAD_SIGNATURE:
+		return BR_ALERT_DECRYPT_ERROR;
+	case BR_ERR_WRONG_KEY_USAGE:
+		return BR_ALERT_UNSUPPORTED_CERTIFICATE;
+	case BR_ERR_NO_CLIENT_AUTH:
+		return 116; /* certificate_required */
+	case BR_ERR_X509_EXPIRED:
+		return BR_ALERT_CERTIFICATE_EXPIRED;
+	case BR_ERR_X509_NOT_TRUSTED:
+		return BR_ALERT_UNKNOWN_CA;
+	default:
+		if (err > BR_ERR_X509_OK && err <= BR_ERR_X509_NOT_TRUSTED) {
+			return BR_ALERT_BAD_CERTIFICATE;
+		}
+		return 0;
+	}
+}
+
+/*
+ * Put a fatal alert in the output buffer, protected like any record; the
+ * payload that was being gathered, if any, is dropped.
+ */
+static void
+write_fatal_alert(br_ssl_engine_context *rc, int alert)
+{
+	unsigned char *buf;
+
+	make_ready_out(rc);
+	buf = rc->obuf + rc->oxa;
+	buf[0] = 2;
+	buf[1] = (unsigned char)alert;
+	rc->record_type_out = BR_SSL_ALERT;
+	if (rc->version_out == 0) {
+		rc->version_out = BR_TLS12;
+	}
+	rc->oxa += 2;
+	sendpld_flush(rc, 0);
+}
+
 /* see inner.h */
 void
 br_ssl_engine_fail(br_ssl_engine_context *rc, int err)
 {
-	if (rc->iomode != BR_IO_FAILED) {
-		rc->iomode = BR_IO_FAILED;
-		rc->err = err;
-		/* the engine does no more I/O: its TLS 1.3 secrets go */
-		br_ssl_engine_tls13_wipe(rc);
+	int alert, sending;
+
+	if (rc->iomode == BR_IO_FAILED) {
+		return;
 	}
+	if (rc->err != BR_ERR_OK) {
+		/* already failing: the alert will not be sent after all */
+		rc->iomode = BR_IO_FAILED;
+		rc->tls13_alert_wait = 0;
+		br_ssl_engine_tls13_wipe(rc);
+		return;
+	}
+	rc->err = err;
+	sending = 0;
+	if (rc->tls13_alerts && err != BR_ERR_OK) {
+		alert = tls13_alert_for(err);
+		if (alert != 0 && rc->tls13_alert != 0) {
+			alert = rc->tls13_alert;
+		}
+		rc->tls13_alerts = 0;
+		if (alert != 0 && rc->obuf != NULL) {
+			sending = 1;
+			if (rc->oxc > rc->oxa) {
+				/* a record is on its way: after it */
+				rc->tls13_alert_wait = (unsigned char)alert;
+			} else {
+				write_fatal_alert(rc, alert);
+			}
+		}
+	}
+	/*
+	 * With an alert to send, the engine stays in a state where it only
+	 * gives those bytes (BR_SSL_SENDREC); it is closed when they are
+	 * acknowledged. Either way the TLS 1.3 secrets go now; the key of
+	 * the sending direction stays only while an alert waits for it.
+	 */
+	if (sending && rc->iomode != BR_IO_FAILED) {
+		rc->iomode = BR_IO_OUT;
+		rc->application_data = 0;
+	} else {
+		rc->iomode = BR_IO_FAILED;
+	}
+	br_ssl_engine_tls13_wipe(rc);
 }
 
 /*
@@ -407,6 +525,10 @@ br_ssl_engine_set_buffers_bidi(br_ssl_engine_context *rc,
 	rc->tls13_out = 0;
 	rc->in_enc = 0;
 	rc->err = BR_ERR_OK;
+	rc->tls13_alerts = 0;
+	rc->tls13_alert = 0;
+	rc->tls13_alert_wait = 0;
+	rc->tls13_post_hs = 0;
 	rc->version_in = 0;
 	rc->record_type_in = 0;
 	rc->version_out = 0;
@@ -699,6 +821,10 @@ recvrec_ack(br_ssl_engine_context *rc, size_t len)
 			} else if (rc->record_type_in
 				!= BR_SSL_APPLICATION_DATA)
 			{
+				/* an alert is not answered with an alert */
+				if (rc->record_type_in == BR_SSL_ALERT) {
+					rc->tls13_alerts = 0;
+				}
 				br_ssl_engine_fail(rc, BR_ERR_UNEXPECTED);
 				return;
 			}
@@ -710,6 +836,9 @@ recvrec_ack(br_ssl_engine_context *rc, size_t len)
 				: rc->in.vtable->check_length(
 					&rc->in.vtable, rlen)))
 			{
+				if (rlen > 16384) {
+					rc->tls13_alert = BR_ALERT_RECORD_OVERFLOW;
+				}
 				br_ssl_engine_fail(rc, BR_ERR_BAD_LENGTH);
 				return;
 			}
@@ -719,6 +848,7 @@ recvrec_ack(br_ssl_engine_context *rc, size_t len)
 			}
 		} else {
 			if (rlen > 16384) {
+				rc->tls13_alert = BR_ALERT_RECORD_OVERFLOW;
 				br_ssl_engine_fail(rc, BR_ERR_BAD_LENGTH);
 				return;
 			}
@@ -777,6 +907,10 @@ recvrec_ack(br_ssl_engine_context *rc, size_t len)
 			rc->ibuf + 5, &pbuf_len, &inner_type);
 		if (pbuf != 0) {
 			rc->record_type_in = (unsigned char)inner_type;
+		} else if (inner_type == -1) {
+			rc->tls13_alert = BR_ALERT_UNEXPECTED_MESSAGE;
+		} else if (inner_type == -2) {
+			rc->tls13_alert = BR_ALERT_RECORD_OVERFLOW;
 		}
 	} else {
 		pbuf = rc->in.vtable->decrypt(&rc->in.vtable,
@@ -970,6 +1104,22 @@ static void
 sendrec_ack(br_ssl_engine_context *rc, size_t len)
 {
 	rc->oxb = (rc->oxa += len);
+	if (rc->err != BR_ERR_OK) {
+		/* the alert of a failed engine: closed once it is gone */
+		if (rc->oxa == rc->oxc) {
+			int alert;
+
+			alert = rc->tls13_alert_wait;
+			if (alert != 0) {
+				write_fatal_alert(rc, alert);
+				rc->tls13_alert_wait = 0;
+				br_ssl_engine_tls13_wipe(rc);
+			} else {
+				rc->iomode = BR_IO_FAILED;
+			}
+		}
+		return;
+	}
 	if (rc->oxa == rc->oxc) {
 		make_ready_out(rc);
 	}
@@ -1145,7 +1295,7 @@ jump_handshake(br_ssl_engine_context *cc, int action)
 		cc->hlen_out = hlen_out;
 		cc->action = action;
 		cc->hsrun(&cc->cpu);
-		if (br_ssl_engine_closed(cc)) {
+		if (br_ssl_engine_closed(cc) || cc->err != BR_ERR_OK) {
 			return;
 		}
 		if (cc->hbuf_out != cc->saved_hbuf_out) {
@@ -1232,6 +1382,9 @@ void
 br_ssl_engine_sendrec_ack(br_ssl_engine_context *cc, size_t len)
 {
 	sendrec_ack(cc, len);
+	if (cc->err != BR_ERR_OK) {
+		return;
+	}
 	if (len != 0 && !has_rec_tosend(cc)
 		&& (cc->record_type_out != BR_SSL_APPLICATION_DATA
 		|| (cc->application_data & 1) == 0))
@@ -1262,7 +1415,7 @@ br_ssl_engine_recvrec_ack(br_ssl_engine_context *cc, size_t len)
 	unsigned char *buf;
 
 	recvrec_ack(cc, len);
-	if (br_ssl_engine_closed(cc)) {
+	if (br_ssl_engine_closed(cc) || cc->err != BR_ERR_OK) {
 		return;
 	}
 
@@ -1295,6 +1448,11 @@ br_ssl_engine_recvrec_ack(br_ssl_engine_context *cc, size_t len)
 			jump_handshake(cc, 0);
 			break;
 		case BR_SSL_APPLICATION_DATA:
+			if (cc->tls13_post_hs) {
+				/* in the middle of a handshake message */
+				br_ssl_engine_fail(cc, BR_ERR_UNEXPECTED);
+				break;
+			}
 			if (cc->application_data == 1) {
 				break;
 			}
@@ -1321,7 +1479,7 @@ br_ssl_engine_recvrec_ack(br_ssl_engine_context *cc, size_t len)
 void
 br_ssl_engine_close(br_ssl_engine_context *cc)
 {
-	if (!br_ssl_engine_closed(cc)) {
+	if (!br_ssl_engine_closed(cc) && cc->err == BR_ERR_OK) {
 		/*
 		 * If we are not already closed, then we need to
 		 * initiate the closure. Once closing, any incoming
@@ -1347,7 +1505,7 @@ br_ssl_engine_renegotiate(br_ssl_engine_context *cc)
 {
 	size_t len;
 
-	if (br_ssl_engine_closed(cc) || cc->reneg == 1
+	if (br_ssl_engine_closed(cc) || cc->err != BR_ERR_OK || cc->reneg == 1
 		|| (cc->flags & BR_OPT_NO_RENEGOTIATION) != 0
 		|| br_ssl_engine_recvapp_buf(cc, &len) != NULL)
 	{
@@ -1406,6 +1564,8 @@ br_ssl_engine_hs_reset(br_ssl_engine_context *cc,
 	cc->shutdown_recv = 0;
 	cc->application_data = 0;
 	cc->alert = 0;
+	cc->tls13_alerts = (cc->version_max >= BR_TLS13);
+	cc->tls13_alert = 0;
 	jump_handshake(cc, 0);
 }
 

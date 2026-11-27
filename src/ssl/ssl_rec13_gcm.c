@@ -175,6 +175,8 @@ gcm13_decrypt(br_sslrec13_gcm_context *cc,
 	 */
 	u = br_tls13_find_type(buf, len);
 	if (u == (size_t)-1 || u > 16384) {
+		/* the record is authentic: say what is wrong with it */
+		*inner_type = (u == (size_t)-1) ? -1 : -2;
 		return NULL;
 	}
 	len = u;
