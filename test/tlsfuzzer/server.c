@@ -27,11 +27,14 @@
  * samples/server_basic.c with three changes: it echoes the application data
  * until the peer closes (tlsfuzzer expects that; it answers only when what
  * it has read ends with a newline, as an HTTP server would wait for the end
- * of a request: several scripts send a line in pieces), it serves each connection
- * in a child process (a script that leaves a connection hanging must not
- * stop the next test), and it stops a child after 120 s. The server key and
- * certificate chain are the sample ones (samples/chain-*.h): tlsfuzzer does
- * not check them. Build: cc -DWITH_TLS13 -DSERVER_RSA=1 (or SERVER_EC=1)
+ * of a request: several scripts send a line in pieces), it serves each
+ * connection in a child process (a script that leaves a connection hanging
+ * must not stop the next test), and it stops a child after 300 s. After an
+ * error it reads everything the peer still sends before it closes: some
+ * probes of 'finished' send 16 MB after the point where the alert goes out.
+ * The server key and certificate chain are the sample ones
+ * (samples/chain-*.h): tlsfuzzer does not check them. Build:
+ * cc -DWITH_TLS13 -DSERVER_RSA=1 (or SERVER_EC=1)
  * -Iinc -Isamples test/tlsfuzzer/server.c build/libbearssl.a
  */
 
@@ -346,7 +349,7 @@ main(int argc, char *argv[])
 			continue;
 		}
 		close(fd);
-		alarm(120);
+		alarm(300);
 
 		/*
 		 * Initialise the context with the cipher suites and
@@ -451,29 +454,18 @@ main(int argc, char *argv[])
 			fprintf(stderr, "SSL error: %d\n", err);
 		}
 		/*
-		 * Close the sending side and read what the peer still sends
-		 * (for a while): closing a socket that has unread data makes
-		 * the system send a reset, which can destroy the alert that we
-		 * just sent before the peer has read it.
+		 * Close the sending side and read what the peer still sends,
+		 * until it closes: closing a socket that has unread data makes
+		 * the system send a reset. The peer then sees a failed write,
+		 * and may never read the alert that we sent. The alarm() above
+		 * bounds the wait; there is no count of reads and no short
+		 * pause that a slow peer could exceed.
 		 */
 		shutdown(cfd, SHUT_WR);
 		{
 			static unsigned char junk[16384];
-			int k;
 
-			for (k = 0; k < 2000; k ++) {
-				fd_set fds;
-				struct timeval tv;
-
-				FD_ZERO(&fds);
-				FD_SET(cfd, &fds);
-				tv.tv_sec = 2;
-				tv.tv_usec = 0;
-				if (select(cfd + 1, &fds, NULL, NULL, &tv) <= 0
-					|| read(cfd, junk, sizeof junk) <= 0)
-				{
-					break;
-				}
+			while (sock_read(&cfd, junk, sizeof junk) > 0) {
 			}
 		}
 		close(cfd);
