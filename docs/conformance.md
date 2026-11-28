@@ -47,7 +47,16 @@ The fork now sends a fatal alert for a TLS 1.3 error in both roles ([reference-a
 
 The scripts found two things that were not about alerts, both now refused with `unexpected_message` (RFC 8446 section 5.1): application data in the middle of a KeyUpdate that came in pieces, and a second KeyUpdate in the same record, after the key had changed.
 
-Seen in what still fails and **not changed**: a ChangeCipherSpec after the handshake is ignored where the script wants an alert (`ccs`, 1); several ChangeCipherSpec records in the packet of the ClientHello end with `protocol_version` (`multiple-ccs-messages`, 4); an empty list of signature algorithms gets `handshake_failure`, not `decode_error` (`signature-algorithms`, 1); two probes of `zero-content-type` during application data. The rest are features that are not implemented (finite-field groups, CCM suites, compression, 0-RTT), the resumption scripts that the test server cannot serve, and scripts **not looked at**.
+Four things seen in what still failed were looked at on 2026-11-28:
+
+| Seen | Cause | Now |
+|---|---|---|
+| A ChangeCipherSpec after the handshake was ignored (`ccs`, 1 probe) | The engine dropped it at any time | `unexpected_message`; a protected record of that type too (RFC 9846 section 5) |
+| ChangeCipherSpec records right after the ClientHello ended with `protocol_version` (`multiple-ccs-messages`, 4 probes and its sanity probe) | The version of the record header was compared with that of the ClientHello (0x0301), which TLS 1.3 says to ignore | The version of an unprotected record is ignored once TLS 1.3 is chosen. A protected record keeps the check, because nothing else covers that byte. Three probes still want an alert for a second ChangeCipherSpec before the Finished; the RFC says to drop every one, so they are expected failures in `run.sh` |
+| An empty list of signature algorithms got `handshake_failure` (`signature-algorithms`, 1 probe) | Read like a list with nothing usable | `decode_error` |
+| Two probes of `zero-content-type` got application data, not an alert | **The test server, not the library**: the script sends a line in two pieces and the server echoed the first piece before it read the bad record | The test server answers when what it has read ends with a newline; the probes pass, and the `keyupdate` probe that was left out for the same reason is back in the gate |
+
+Found on the way: a server context that was used for a second connection kept the mark of the first one until the new ClientHello was processed; `br_ssl_engine_hs_reset()` now clears it. `ccs`, `zero-content-type`, `signature-algorithms` and `multiple-ccs-messages` are in the gate. All 57 scripts afterwards: 2168 probes passed, 760 failed (the totals vary between runs). The rest are features that are not implemented (finite-field groups, CCM suites, compression, 0-RTT), the resumption scripts that the test server cannot serve, and scripts **not looked at**.
 
 ## Fixed because of it (2026-11-21)
 

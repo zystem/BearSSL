@@ -63,6 +63,8 @@ In a TLS 1.3 connection (and, when TLS 1.3 is enabled, before the version is cho
 
 A server also answers a TLS 1.3 ClientHello itself, before any key, with `protocol_version` when its `legacy_version` is not 0x0303, with `illegal_parameter` when it offers compression, and with `missing_extension` (109) when `signature_algorithms`, `supported_groups`, `key_share` or `psk_key_exchange_modes` is missing where [RFC 9846](https://www.rfc-editor.org/rfc/rfc9846.html) section 9.2 asks for it.
 
+**ChangeCipherSpec and record versions** (TLS 1.3): an unprotected ChangeCipherSpec of one byte 1 is dropped until the peer has finished its handshake; after that, or protected, it is `unexpected_message`. The version in the header of an unprotected record is ignored once TLS 1.3 is chosen; a protected record must carry 0x0303. An empty list of signature algorithms in a ClientHello is `decode_error`.
+
 **Alerts received** (TLS 1.3, once keys are in use): the level is not looked at. `close_notify` closes the connection, `user_canceled` is ignored, and every other alert, known or not, ends the connection with `BR_ERR_RECV_FATAL_ALERT` plus its number. TLS 1.2 and older behave as upstream: a warning is ignored.
 
 ## Keys of the records

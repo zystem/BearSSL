@@ -286,6 +286,16 @@ static void make_ready_out(br_ssl_engine_context *rc);
 static void sendpld_flush(br_ssl_engine_context *rc, int force);
 
 /*
+ * Whether this connection is TLS 1.3: the keys are in use, a
+ * HelloRetryRequest was exchanged, or the server has chosen the version.
+ */
+static int
+tls13_chosen(const br_ssl_engine_context *cc)
+{
+	return cc->tls13_in || cc->tls13_hrr != 0 || cc->tls13_server != 0;
+}
+
+/*
  * The alert that tells the peer about a local error (RFC 8446, section 6),
  * or 0 for an error that is not the peer's to know (a closure, an alert
  * that was received or already sent, an I/O or a local failure).
@@ -529,6 +539,8 @@ br_ssl_engine_set_buffers_bidi(br_ssl_engine_context *rc,
 	rc->tls13_alert = 0;
 	rc->tls13_alert_wait = 0;
 	rc->tls13_post_hs = 0;
+	rc->tls13_server = 0;
+	rc->tls13_hrr = 0;
 	rc->version_in = 0;
 	rc->record_type_in = 0;
 	rc->version_out = 0;
@@ -791,11 +803,21 @@ recvrec_ack(br_ssl_engine_context *rc, size_t len)
 		 * variables when necessary to accommodate the protocol
 		 * negotiation details.
 		 */
-		if (rc->version_in != 0 && rc->version_in != version) {
-			br_ssl_engine_fail(rc, BR_ERR_BAD_VERSION);
-			return;
+		/*
+		 * In TLS 1.3 the version of a record that is not protected
+		 * is not looked at (RFC 9846, section 5.1): a peer may
+		 * still write 0x0301 there. A protected record keeps the
+		 * check; its version byte is not covered otherwise.
+		 */
+		if (!(tls13_chosen(rc)
+			&& rc->record_type_in != BR_SSL_APPLICATION_DATA))
+		{
+			if (rc->version_in != 0 && rc->version_in != version) {
+				br_ssl_engine_fail(rc, BR_ERR_BAD_VERSION);
+				return;
+			}
+			rc->version_in = version;
 		}
-		rc->version_in = version;
 
 		/*
 		 * Decode record length. We must check that the length
@@ -1428,13 +1450,22 @@ br_ssl_engine_recvrec_ack(br_ssl_engine_context *cc, size_t len)
 	if (buf != NULL) {
 		switch (cc->record_type_in) {
 		case BR_SSL_CHANGE_CIPHER_SPEC:
-			if (cc->tls13_in || cc->tls13_hrr != 0) {
+			if (tls13_chosen(cc)) {
 				/*
 				 * TLS 1.3 compatibility mode: a plaintext
 				 * ChangeCipherSpec record (one byte of
-				 * value 1) is ignored.
+				 * value 1) is ignored during the handshake;
+				 * after it, or when it is protected, it is
+				 * an error.
 				 */
-				if (len != 1 || buf[0] != 1) {
+				if (cc->application_data == 1 || cc->in_enc) {
+					br_ssl_engine_fail(cc,
+						BR_ERR_UNEXPECTED);
+					break;
+				}
+				if (len != 1 || buf[0] != 1
+					|| !br_ssl_engine_recvrec_finished(cc))
+				{
 					br_ssl_engine_fail(cc, BR_ERR_BAD_CCS);
 					break;
 				}

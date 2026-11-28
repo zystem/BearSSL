@@ -12271,6 +12271,139 @@ test_alerts_rfc9846(void)
 #undef NEW_PAIR
 }
 
+/*
+ * ChangeCipherSpec records of the compatibility mode, the version of a record
+ * header, and an empty list of signature algorithms.
+ */
+static void
+test_alerts_ccs(void)
+{
+	static const unsigned char ccs[] = { 20, 3, 3, 0, 1, 1 };
+	static const unsigned char ccs_old[] = { 20, 3, 1, 0, 1, 1 };
+	static const unsigned char ccs_two[] = { 20, 3, 3, 0, 2, 1, 1 };
+	static unsigned char cachebuf[4096];
+	static unsigned char m[8192], f[8192];
+	br_ssl_session_cache_lru lru;
+	br_ssl_session_parameters saved;
+	br_ssl_engine_context *ce, *se;
+	sess_opts o;
+	size_t len, n, off, end;
+
+#define NEW_PAIR(s)   do { \
+		br_ssl_session_cache_lru_init(&lru, cachebuf, \
+			sizeof cachebuf); \
+		memset(&saved, 0, sizeof saved); \
+		memset(&o, 0, sizeof o); \
+		o.salt = (unsigned char)(s); \
+		sess_setup(&o, &saved, &lru, &ce, &se); \
+	} while (0)
+
+	/* after the ClientHello: ignored, any number, any record version */
+	NEW_PAIR(200);
+	len = take_out(ce, m, sizeof m);
+	give(se, m, len);
+	give(se, ccs, sizeof ccs);
+	give(se, ccs_old, sizeof ccs_old);
+	give(se, ccs, sizeof ccs);
+	loop_pump(ce, se);
+	H13_CHECK(br_ssl_engine_last_error(se) == 0
+		&& br_ssl_engine_last_error(ce) == 0
+		&& (br_ssl_engine_current_state(se) & BR_SSL_SENDAPP) != 0,
+		"ccs: ignored during the handshake");
+
+	/* after the handshake it is an error */
+	give(se, ccs, sizeof ccs);
+	H13_CHECK(br_ssl_engine_last_error(se) == BR_ERR_UNEXPECTED,
+		"ccs: refused after the handshake of the peer");
+	loop_pump(ce, se);
+	H13_CHECK(br_ssl_engine_last_error(ce)
+		== BR_ERR_RECV_FATAL_ALERT + 10, "ccs: the peer is told");
+
+	/*
+	 * Two bytes in one record, a protected record of this type, and a
+	 * context used again: before its ClientHello it takes none.
+	 */
+	NEW_PAIR(201);
+	len = take_out(ce, m, sizeof m);
+	give(se, m, len);
+	give(se, ccs_two, sizeof ccs_two);
+	H13_CHECK(br_ssl_engine_last_error(se) == BR_ERR_BAD_CCS,
+		"ccs: one byte only");
+
+	NEW_PAIR(202);
+	loop_pump(ce, se);
+	inject_record(ce, se, 20, ccs + 5, 1);
+	H13_CHECK(br_ssl_engine_last_error(se) == BR_ERR_UNEXPECTED,
+		"ccs: a protected one is refused");
+
+	NEW_PAIR(203);
+	loop_pump(ce, se);
+	br_ssl_server_reset(&lsc);
+	give(se, ccs, sizeof ccs);
+	H13_CHECK(br_ssl_engine_last_error(se) != 0,
+		"ccs: not before a ClientHello");
+
+	/* a protected one during the handshake, from the server */
+	{
+		br_sslrec13_gcm_context enc;
+		unsigned char key[16], iv[12], buf[128], *r;
+		size_t rlen = 1;
+
+		NEW_PAIR(205);
+		len = take_out(ce, m, sizeof m);
+		give(se, m, len);
+		take_out(se, f, sizeof f);
+		give(ce, f, rec_len(f));
+		br_tls13_traffic_keys(&br_sha256_vtable, ce->tls13_shs,
+			16, key, iv);
+		br_sslrec13_out_gcm_vtable.init(&enc.vtable.out,
+			&br_aes_ct_ctr_vtable, key, 16, &br_ghash_ctmul, iv);
+		buf[64] = 1;
+		r = br_sslrec13_out_gcm_vtable.inner.encrypt(
+			(const br_sslrec13_out_class **)(void *)&enc.vtable.out,
+			20, buf + 64, &rlen);
+		give(ce, r, rlen);
+		H13_CHECK(br_ssl_engine_last_error(ce) == BR_ERR_UNEXPECTED,
+			"ccs: a protected one during the handshake");
+	}
+
+	/* an empty list of signature algorithms is a decoding error */
+	{
+		size_t xoff, xlen, cut;
+
+		NEW_PAIR(204);
+		len = take_out(ce, m, sizeof m);
+		off = 5 + 4 + 2 + 32;
+		off += 1 + m[off];
+		off += 2 + (((size_t)m[off] << 8) | m[off + 1]);
+		off += 1 + m[off];
+		xoff = off;
+		end = off + 2 + (((size_t)m[off] << 8) | m[off + 1]);
+		off += 2;
+		for (;;) {
+			H13_CHECK(off + 4 <= end, "ccs: signature_algorithms");
+			xlen = ((size_t)m[off + 2] << 8) | m[off + 3];
+			if (m[off] == 0 && m[off + 1] == 13) {
+				break;
+			}
+			off += 4 + xlen;
+		}
+		cut = xlen - 2;
+		m[off + 2] = 0;
+		m[off + 3] = 2;
+		m[off + 4] = 0;
+		m[off + 5] = 0;
+		memmove(m + off + 6, m + off + 4 + xlen, len - off - 4 - xlen);
+		inc_len(m + xoff, 2, 0 - cut);
+		inc_len(m + 6, 3, 0 - cut);
+		inc_len(m + 3, 2, 0 - cut);
+		n = alert_exchange(se, m, len - cut, f, sizeof f);
+		H13_CHECK(n == 7 && f[0] == 21 && f[6] == 50,
+			"ccs: an empty list of signature algorithms");
+	}
+#undef NEW_PAIR
+}
+
 static void
 test_TLS13_ALERTS(void)
 {
@@ -12377,6 +12510,7 @@ test_TLS13_ALERTS(void)
 		"alerts: closed, the first error is kept");
 	test_alerts_post_handshake();
 	test_alerts_rfc9846();
+	test_alerts_ccs();
 	printf("done.\n");
 	fflush(stdout);
 }
