@@ -4,7 +4,7 @@
 
 ## Next
 
-1. **Record the 24 hour fuzz run started on 2026-11-26** (code of `23a719e`), and run one on each release, with `test/fuzz/run.sh` ([testing.md](testing.md)).
+1. **Run a 24 hour fuzz on the code of each release** with `test/fuzz/run.sh`; the changes of 2026-11-28 have none yet ([testing.md](testing.md)).
 2. **Move the Nim package** (`nim-bearssl`) to this fork, so that nim-grpc and CiNim build against it without patches ([contrib/nim](../contrib/nim/README.md)). This is the reason the fork exists.
 3. **Watch the weekly runs** (`fuzz.yml`, `scorecard.yml`, CodeQL) and fix what they find before anything else is added.
 4. **Merge upstream** when it changes (the fork tracks `v0.6` plus the commits after it); keep the TLS 1.3 code in separate files so the merge stays small ([explanation-design.md](explanation-design.md)).

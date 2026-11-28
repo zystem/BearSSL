@@ -11973,6 +11973,304 @@ test_alerts_post_handshake(void)
 	}
 }
 
+/* Everything that an engine has to send, taken from it. */
+static size_t
+take_out(br_ssl_engine_context *eng, unsigned char *out, size_t out_max)
+{
+	size_t n = 0, bl;
+	unsigned char *b;
+
+	while ((b = br_ssl_engine_sendrec_buf(eng, &bl)) != NULL) {
+		H13_CHECK(n + bl <= out_max, "rfc9846: buffer");
+		memcpy(out + n, b, bl);
+		n += bl;
+		br_ssl_engine_sendrec_ack(eng, bl);
+	}
+	return n;
+}
+
+/* Give bytes to an engine, as far as it takes them. */
+static void
+give(br_ssl_engine_context *eng, const unsigned char *in, size_t len)
+{
+	size_t off = 0, bl;
+	unsigned char *b;
+
+	while (off < len
+		&& (b = br_ssl_engine_recvrec_buf(eng, &bl)) != NULL)
+	{
+		if (bl > len - off) {
+			bl = len - off;
+		}
+		memcpy(b, in + off, bl);
+		br_ssl_engine_recvrec_ack(eng, bl);
+		off += bl;
+	}
+}
+
+static size_t
+rec_len(const unsigned char *rec)
+{
+	return 5 + (((size_t)rec[3] << 8) | rec[4]);
+}
+
+static void
+inc_len(unsigned char *p, size_t nbytes, size_t add)
+{
+	size_t v = 0, u;
+
+	for (u = 0; u < nbytes; u ++) {
+		v = (v << 8) | p[u];
+	}
+	v += add;
+	for (u = nbytes; u > 0; u --) {
+		p[u - 1] = (unsigned char)v;
+		v >>= 8;
+	}
+}
+
+/*
+ * Open the protected record number 'seq' of a direction (TLS 1.3,
+ * AES-128-GCM, traffic secret 'secret'), insert 'add' at offset 'at' of its
+ * content (at the end if 'at' is negative) and protect it again. With
+ * 'ee' the two lengths of an EncryptedExtensions message are updated.
+ * Returns the length of the new record, written to 'out'.
+ */
+static size_t
+reseal(const unsigned char *secret, const unsigned char *rec, uint64_t seq,
+	long at, const void *add, size_t add_len, int ee, unsigned char *out)
+{
+	static unsigned char pt[8192], buf[8192];
+	br_sslrec13_gcm_context in, enc;
+	unsigned char key[16], iv[12], *p, *r;
+	size_t len, rlen, off;
+	int type;
+
+	br_tls13_traffic_keys(&br_sha256_vtable, secret, 16, key, iv);
+	br_sslrec13_in_gcm_vtable.init(&in.vtable.in,
+		&br_aes_ct_ctr_vtable, key, 16, &br_ghash_ctmul, iv);
+	br_sslrec13_out_gcm_vtable.init(&enc.vtable.out,
+		&br_aes_ct_ctr_vtable, key, 16, &br_ghash_ctmul, iv);
+	in.seq = seq;
+	enc.seq = seq;
+	len = rec_len(rec) - 5;
+	H13_CHECK(len + add_len + 128 < sizeof buf, "rfc9846: record size");
+	memcpy(pt, rec + 5, len);
+	p = br_sslrec13_in_gcm_vtable.inner.decrypt(
+		(const br_sslrec13_in_class **)(void *)&in.vtable.in,
+		pt, &len, &type);
+	H13_CHECK(p != NULL, "rfc9846: the record opens");
+	off = at < 0 ? len : (size_t)at;
+	memcpy(buf + 64, p, off);
+	memcpy(buf + 64 + off, add, add_len);
+	memcpy(buf + 64 + off + add_len, p + off, len - off);
+	if (ee) {
+		H13_CHECK(buf[64] == 8, "rfc9846: EncryptedExtensions first");
+		inc_len(buf + 65, 3, add_len);
+		inc_len(buf + 68, 2, add_len);
+	}
+	rlen = len + add_len;
+	r = br_sslrec13_out_gcm_vtable.inner.encrypt(
+		(const br_sslrec13_out_class **)(void *)&enc.vtable.out,
+		type, buf + 64, &rlen);
+	memcpy(out, r, rlen);
+	return rlen;
+}
+
+/*
+ * What RFC 9846 asks of a receiver: the level of an alert, messages that
+ * cross a change of keys, the ClientHello, extensions out of place.
+ */
+static void
+test_alerts_rfc9846(void)
+{
+	/* alert sent, error of the receiver (0: goes on) */
+	static const struct {
+		unsigned char level, desc;
+		int err;
+	} al[] = {
+		{ 1, 50, BR_ERR_RECV_FATAL_ALERT + 50 },
+		{ 1, 200, BR_ERR_RECV_FATAL_ALERT + 200 },
+		{ 1, 100, BR_ERR_RECV_FATAL_ALERT + 100 },
+		{ 1, 90, 0 },
+		{ 2, 90, 0 }
+	};
+	/* a KeyUpdate, for the places where nothing may follow */
+	static const unsigned char ku[] = { 24, 0, 0, 1, 0 };
+	static const unsigned char ext_ks[] = { 0, 51, 0, 0 };
+	static unsigned char cachebuf[4096];
+	static unsigned char m[8192], f[8192], g[8192];
+	br_ssl_session_cache_lru lru;
+	br_ssl_session_parameters saved;
+	br_ssl_engine_context *ce, *se;
+	sess_opts o;
+	size_t u, n, len, off, flen, glen;
+	int role, k;
+
+#define NEW_PAIR(s)   do { \
+		br_ssl_session_cache_lru_init(&lru, cachebuf, \
+			sizeof cachebuf); \
+		memset(&saved, 0, sizeof saved); \
+		memset(&o, 0, sizeof o); \
+		o.salt = (unsigned char)(s); \
+		sess_setup(&o, &saved, &lru, &ce, &se); \
+	} while (0)
+
+	/* the full profiles do not allow TLS 1.0 and 1.1 (RFC 8996) */
+	br_ssl_client_init_full(&lcc, &lxc, NULL, 0);
+	H13_CHECK(lcc.eng.version_min == BR_TLS12,
+		"rfc9846: minimum version of the client");
+	br_ssl_server_init_full_rsa(&lsc, NULL, 0, NULL);
+	H13_CHECK(lsc.eng.version_min == BR_TLS12,
+		"rfc9846: minimum version of the RSA server");
+	br_ssl_server_init_full_ec(&lsc, NULL, 0, BR_KEYTYPE_EC, NULL);
+	H13_CHECK(lsc.eng.version_min == BR_TLS12,
+		"rfc9846: minimum version of the EC server");
+
+	/* alerts to a connected engine */
+	for (role = 0; role < 2; role ++) {
+		for (u = 0; u < sizeof al / sizeof al[0]; u ++) {
+			br_ssl_engine_context *from, *to;
+			unsigned char a[2];
+
+			NEW_PAIR(160 + role * 8 + u);
+			loop_pump(ce, se);
+			from = role == 0 ? ce : se;
+			to = role == 0 ? se : ce;
+			a[0] = al[u].level;
+			a[1] = al[u].desc;
+			inject_record(from, to, 21, a, 2);
+			H13_CHECK(br_ssl_engine_last_error(to) == al[u].err,
+				"rfc9846: the level of an alert says nothing");
+			H13_CHECK(al[u].err != 0
+				|| br_ssl_engine_current_state(to) != BR_SSL_CLOSED,
+				"rfc9846: user_canceled is ignored");
+		}
+	}
+
+	/* ClientHello messages that a server refuses */
+	for (k = 0; k < 5; k ++) {
+		static const struct {
+			unsigned ext;
+			int alert;
+		} ch[] = {
+			{ 0, 70 }, { 0, 47 }, { 10, 109 }, { 13, 109 }, { 51, 109 }
+		};
+
+		NEW_PAIR(180 + k);
+		len = take_out(ce, m, sizeof m);
+		/* header, version, random, session ID, suites */
+		off = 5 + 4;
+		if (k == 0) {
+			m[off + 1] = 0x02;
+		}
+		off += 2 + 32;
+		off += 1 + m[off];
+		off += 2 + (((size_t)m[off] << 8) | m[off + 1]);
+		if (k == 1) {
+			m[off + 1] = 1;
+		}
+		off += 1 + m[off] + 2;
+		/* the extension takes a type that nobody knows */
+		while (ch[k].ext != 0) {
+			H13_CHECK(off + 4 <= len, "rfc9846: extension found");
+			if ((((unsigned)m[off] << 8) | m[off + 1]) == ch[k].ext) {
+				m[off] = 0xAA;
+				m[off + 1] = 0xAA;
+				break;
+			}
+			off += 4 + (((size_t)m[off + 2] << 8) | m[off + 3]);
+		}
+		n = alert_exchange(se, m, len, f, sizeof f);
+		H13_CHECK(n == 7 && f[0] == 21 && f[6] == ch[k].alert,
+			"rfc9846: a ClientHello that is not allowed");
+	}
+
+	/* after the ServerHello: more in its record, or an extension of
+	   TLS 1.2 in it */
+	for (k = 0; k < 2; k ++) {
+		static const unsigned char sni[] = { 0, 0, 0, 0 };
+		size_t xl;
+
+		NEW_PAIR(190 + k);
+		len = take_out(ce, m, sizeof m);
+		give(se, m, len);
+		take_out(se, f, sizeof f);
+		flen = rec_len(f);
+		memcpy(g, f, flen);
+		memcpy(g + flen, sni, sizeof sni);
+		glen = flen + sizeof sni;
+		inc_len(g + 3, 2, sizeof sni);
+		if (k == 1) {
+			inc_len(g + 6, 3, sizeof sni);
+			/* the length of the list of extensions */
+			xl = 5 + 4 + 2 + 32;
+			xl += 1 + g[xl] + 2 + 1;
+			inc_len(g + xl, 2, sizeof sni);
+		}
+		n = alert_exchange(ce, g, glen, m, sizeof m);
+		H13_CHECK(br_ssl_engine_last_error(ce)
+			== (k == 0 ? BR_ERR_UNEXPECTED : BR_ERR_EXTRA_EXTENSION),
+			"rfc9846: ServerHello");
+		H13_CHECK(n == 7 && m[0] == 21 && m[6] == (k == 0 ? 10 : 47),
+			"rfc9846: the alert for the ServerHello");
+	}
+
+	/* the flight of the server: a message after the Finished in the same
+	   record (k = 0), an extension out of place (k = 1) */
+	for (k = 0; k < 2; k ++) {
+		uint64_t seq;
+
+		NEW_PAIR(194 + k);
+		len = take_out(ce, m, sizeof m);
+		give(se, m, len);
+		len = take_out(se, f, sizeof f);
+		flen = rec_len(f);
+		give(ce, f, flen);
+		off = flen;
+		for (seq = 0; off < len; seq ++) {
+			flen = rec_len(f + off);
+			if (k == 0 && off + flen == len) {
+				glen = reseal(ce->tls13_shs, f + off, seq,
+					-1, ku, sizeof ku, 0, g);
+			} else if (k == 1 && seq == 0) {
+				glen = reseal(ce->tls13_shs, f + off, seq,
+					6, ext_ks, sizeof ext_ks, 1, g);
+			} else {
+				memcpy(g, f + off, flen);
+				glen = flen;
+			}
+			give(ce, g, glen);
+			off += flen;
+		}
+		H13_CHECK(br_ssl_engine_last_error(ce)
+			== (k == 0 ? BR_ERR_UNEXPECTED : BR_ERR_EXTRA_EXTENSION),
+			"rfc9846: the flight of the server");
+		loop_pump(ce, se);
+		H13_CHECK(br_ssl_engine_last_error(se)
+			== BR_ERR_RECV_FATAL_ALERT + (k == 0 ? 10 : 47),
+			"rfc9846: the server is told");
+	}
+
+	/* a message after the Finished of the client in the same record */
+	NEW_PAIR(198);
+	len = take_out(ce, m, sizeof m);
+	give(se, m, len);
+	len = take_out(se, f, sizeof f);
+	give(ce, f, len);
+	len = take_out(ce, m, sizeof m);
+	H13_CHECK(len > 5 && len == rec_len(m), "rfc9846: one record");
+	glen = reseal(se->tls13_chs, m, 0, -1, ku, sizeof ku, 0, g);
+	give(se, g, glen);
+	H13_CHECK(br_ssl_engine_last_error(se) == BR_ERR_UNEXPECTED,
+		"rfc9846: nothing after the Finished of the client");
+	loop_pump(ce, se);
+	H13_CHECK(br_ssl_engine_last_error(ce)
+		== BR_ERR_RECV_FATAL_ALERT + 10,
+		"rfc9846: the client is told");
+#undef NEW_PAIR
+}
+
 static void
 test_TLS13_ALERTS(void)
 {
@@ -12078,6 +12376,7 @@ test_TLS13_ALERTS(void)
 		&& br_ssl_engine_last_error(se) == BR_ERR_UNEXPECTED,
 		"alerts: closed, the first error is kept");
 	test_alerts_post_handshake();
+	test_alerts_rfc9846();
 	printf("done.\n");
 	fflush(stdout);
 }

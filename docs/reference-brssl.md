@@ -6,7 +6,7 @@
 
 | Setting | Default | Notes |
 |---|---|---|
-| `-vmin` | `TLS-1.0` | Names: `TLS-1.0`, `TLS-1.1`, `TLS-1.2`, `TLS-1.3`; `-list` prints the short forms `tls10` to `tls13`, which also work. |
+| `-vmin` | `TLS-1.2` | For TLS 1.0 or 1.1 (deprecated, RFC 8996) give `-vmin`; `-vmax` below 1.2 alone is refused. Names: `TLS-1.0`, `TLS-1.1`, `TLS-1.2`, `TLS-1.3`; `-list` prints the short forms `tls10` to `tls13`, which also work. |
 | `-vmax` | `TLS-1.2` | **TLS 1.3 is off unless you pass `-vmax TLS-1.3`.** The same is true of programs that use the library: see [enable TLS 1.3](howto-enable-tls13.md). |
 | `-ku` | none (a KeyUpdate before the limit of the cipher: 2^24 records with AES-GCM, 2^32 with ChaCha20-Poly1305) | TLS 1.3: change the sending key after this number of records. For tests of KeyUpdate with another peer; a real program calls `br_ssl_engine_set_tls13_key_update_interval()`. |
 | `-cs` (cipher suites) | every suite of the tool's list up to `-vmax` (the TLS 1.3 ones only when `-vmax TLS-1.3`) | TLS 1.3 suites: `TLS13_AES_128_GCM_SHA256`, `TLS13_AES_256_GCM_SHA384`, `TLS13_CHACHA20_POLY1305_SHA256`. With `-cs` you list names; list only TLS 1.3 names and `-vmin TLS-1.3` for a TLS 1.3-only run. |
@@ -38,7 +38,7 @@ options:
    -key file       set client private key (for certificate authentication)
    -nostaticecdh   prohibit full-static ECDH (client certificate)
    -list           list supported names (protocols, algorithms...)
-   -vmin name      set minimum supported version (default: TLS-1.0)
+   -vmin name      set minimum supported version (default: TLS-1.2)
    -vmax name      set maximum supported version (default: TLS-1.2)
    -ku num         TLS 1.3: change the sending key after num records
    -cs names       set list of supported cipher suites (comma-separated)
@@ -68,7 +68,7 @@ options:
    -CA file        add trust anchors from 'file' (for client auth)
    -anon_ok        request but do not require a client certificate
    -list           list supported names (protocols, algorithms...)
-   -vmin name      set minimum supported version (default: TLS-1.0)
+   -vmin name      set minimum supported version (default: TLS-1.2)
    -vmax name      set maximum supported version (default: TLS-1.2)
    -ku num         TLS 1.3: change the sending key after num records
    -cs names       set list of supported cipher suites (comma-separated)

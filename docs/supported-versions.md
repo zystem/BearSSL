@@ -6,8 +6,9 @@
 
 | Version | Client | Server | Notes |
 |---|---|---|---|
-| TLS 1.0, 1.1, 1.2 | as upstream | as upstream | unchanged; `-vmax` / `br_ssl_engine_set_versions()` default |
-| TLS 1.3 (RFC 8446) | yes | yes | off until the program asks for it |
+| TLS 1.2 | yes | yes | as upstream; the default |
+| TLS 1.0, 1.1 | if asked for | if asked for | deprecated (RFC 8996). The profile functions do not allow them (upstream's full profiles do); `br_ssl_engine_set_versions()` does. `brssl` too: it needs `-vmin TLS-1.0` or `TLS-1.1` |
+| TLS 1.3 (RFC 8446; [not all of RFC 9846](rfc9846.md)) | yes | yes | off until the program asks for it |
 | SSL 3.0 and older | no | no | as upstream |
 
 ## TLS 1.3 features

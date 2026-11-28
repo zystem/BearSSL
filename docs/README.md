@@ -17,6 +17,7 @@
 | [testing.md](testing.md) | record | what was run, on what, when; what was not |
 | [../SECURITY-REVIEW-2026-11-21.en.md](../SECURITY-REVIEW-2026-11-21.en.md), [../SECURITY-REVIEW-2026-11-22.en.md](../SECURITY-REVIEW-2026-11-22.en.md) | record | two expert reviews of the TLS 1.3 code (findings, what was run) |
 | [conformance.md](conformance.md) | record | what other TLS projects taught us: tlsfuzzer, peers, their closed issues |
+| [rfc9846.md](rfc9846.md) | record | the successor of RFC 8446: what changed, what is not met |
 | [building.md](building.md) | how-to and reference | build, and where the dependencies come from |
 | [architecture.md](architecture.md) | explanation | actors and actions in the system |
 | [threat-model.md](threat-model.md) | explanation | what is protected, against whom, what is not covered |

@@ -76,7 +76,7 @@ usage_twrch(void)
 	fprintf(stderr,
 "   -list           list supported names (protocols, algorithms...)\n");
 	fprintf(stderr,
-"   -vmin name      set minimum supported version (default: TLS-1.0)\n");
+"   -vmin name      set minimum supported version (default: TLS-1.2)\n");
 	fprintf(stderr,
 "   -vmax name      set maximum supported version (default: TLS-1.2)\n");
 	fprintf(stderr,
@@ -561,7 +561,7 @@ do_twrch(int argc, char *argv[])
 	}
 
 	if (vmin == 0) {
-		vmin = BR_TLS10;
+		vmin = BR_TLS12;
 	}
 	if (vmax == 0) {
 		vmax = BR_TLS12;

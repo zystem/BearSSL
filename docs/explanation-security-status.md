@@ -12,12 +12,12 @@
 - Interop: OpenSSL, GnuTLS, Go, grpc-go, nim-grpc, both roles, with mutual TLS, HelloRetryRequest, KeyUpdate and resumption.
 - Mutation checks: wrong labels and wrong contexts were put in on purpose to see that a test fails.
 - Sanitizers: AddressSanitizer and UndefinedBehaviorSanitizer (the alignment check off) on the unit tests and the interop runs.
-- Fuzzing: libFuzzer on the client and server engines with a build in which the cryptographic checks are off (so the fuzzer reaches the parser). A 24-hour run was in progress on 2026-11-20; its result is not in these documents yet ([testing](testing.md)).
+- Fuzzing: libFuzzer on the client and server engines with a build in which the cryptographic checks are off (so the fuzzer reaches the parser). 24 hour runs found nothing, the last two finished on 2026-11-27 and 28; the changes of 2026-11-28 have none ([testing](testing.md)).
 
 ## What is known to be missing
 
 - No ticket age check or replay protection beyond the server cache; no 0-RTT (so replay does not matter for early data, which does not exist).
-- No `tlsfuzzer` run, no other conformance suite.
+- Conformance: `tlsfuzzer` against the server only, with many probes that fail or were not looked at ([conformance.md](conformance.md)); not all of RFC 9846 is met ([rfc9846.md](rfc9846.md)). No other conformance suite.
 - No timing or cache-leak measurement of the new C code. The new code handles secrets only through the upstream HMAC and AEAD code and compares MACs and tags in constant time by design; this was reviewed by us, not measured.
 - Alignment sanitizer not run (upstream deliberately loads unaligned words).
 - Interop was run on Linux x86-64 only.

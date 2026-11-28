@@ -724,9 +724,17 @@ cc: tls13-srv-make-ticket ( -- len ) {
 	T0_PUSH((uint32_t)br_ssl_server_tls13_make_ticket(CTX));
 }
 
+\ Set a bit of tls13_neg: 1 TLS 1.3 is offered, 2 psk_dhe_ke is accepted;
+\ then the extensions that were seen: 4 supported_groups, 8
+\ signature_algorithms, 16 key_share, 32 pre_shared_key, 64
+\ psk_key_exchange_modes.
+: neg-bit ( bit -- )
+	addr-tls13_neg get8 or addr-tls13_neg set8 ;
+
 \ Read the psk_key_exchange_modes extension: bit 1 of tls13_neg is set if
 \ the client accepts psk_dhe_ke (the only mode that we use).
 : read-client-pskmodes ( lim -- lim )
+	64 neg-bit
 	read16 open-elt
 	read8 open-elt
 	begin dup while
@@ -740,6 +748,7 @@ cc: tls13-srv-make-ticket ( -- len ) {
 \ at the same position is kept. The hashes of the ClientHello up to the
 \ binders are saved, for the check of the binder.
 : read-client-psk ( lim -- lim )
+	32 neg-bit
 	read16 open-elt
 	read16 open-elt
 	0 { idx }
@@ -798,6 +807,7 @@ cc: tls13-srv-make-ticket ( -- len ) {
 \ group we support is kept (as the ECDHE curve and point); the others are
 \ skipped.
 : read-client-keyshare ( lim -- lim )
+	16 neg-bit
 	read16 open-elt
 	read16 open-elt
 	begin dup while
@@ -830,6 +840,15 @@ cc: tls13-srv-make-ticket ( -- len ) {
 	0x0304 addr-version set16
 	0x0303 addr-version_in set16
 	0x0303 addr-version_out set16
+	\ The legacy version of a TLS 1.3 ClientHello is TLS 1.2.
+	addr-client_max_version get16 0x0303 <> if 70 fail-alert then
+	\ Extensions that must be there (RFC 9846, section 9.2): without a
+	\ pre-shared key, signature_algorithms and supported_groups; groups
+	\ and key shares together; with a pre-shared key, its modes.
+	addr-tls13_neg get8 { exts }
+	exts 32 and 0= exts 12 and 12 <> and if 109 fail-alert then
+	exts 4 and 0<> exts 16 and 0<> <> if 109 fail-alert then
+	exts 32 and 0<> exts 64 and 0= and if 109 fail-alert then
 	\ ALPN first, as with TLS 1.2: a refusal is reported before the policy
 	\ handler is called.
 	addr-selected_protocol get16 0xFFFF = if
@@ -975,6 +994,7 @@ cc: tls13-srv-make-ticket ( -- len ) {
 	\ Compression methods. We need method 0 (no compression).
 	0 { ok-compression }
 	read8 open-elt
+	dup 1 = { one-compression }
 	begin dup while
 		read8 ifnot -1 >ok-compression then
 	repeat
@@ -1008,10 +1028,12 @@ cc: tls13-srv-make-ticket ( -- len ) {
 				endof
 				\ Signature Algorithms.
 				0x000D of
+					8 neg-bit
 					read-signatures
 				endof
 				\ Supported Curves.
 				0x000A of
+					4 neg-bit
 					read-supported-curves
 				endof
 				\ Supported Point Formats.
@@ -1056,9 +1078,10 @@ cc: tls13-srv-make-ticket ( -- len ) {
 
 	\ TLS 1.3: if the client offers it, we support it and this is not a
 	\ renegotiation, the rest is done by the TLS 1.3 code.
-	addr-tls13_neg get8 addr-tls13_initial get8 and
+	addr-tls13_neg get8 1 and 0<> addr-tls13_initial get8 0<> and
 	addr-version_max get16 0x0303 > and if
-		ok-compression ifnot 40 fail-alert then
+		\ TLS 1.3 allows the null compression method and nothing else.
+		ok-compression one-compression and ifnot 47 fail-alert then
 		do-ClientHello13
 		0 ret
 	then
@@ -1925,6 +1948,8 @@ cc: verify-CV-sig ( sig-len -- err ) {
 	addr-pad 256 + tls13-hlen read-blob
 	close-elt
 	tls13-check-finished-client ifnot ERR_BAD_FINISHED 51 fail-with-alert then
+	\ the keys change here: nothing may follow in this record
+	more-incoming-bytes? if ERR_UNEXPECTED fail then
 	1 1 tls13-switch
 
 	\ The resumption master secret (the transcript up to the client

@@ -6,7 +6,7 @@ BearSSL is a small, constant-time TLS library in C that does not call `malloc`; 
 
 **This code has not been audited by anyone outside the project.** The TLS 1.3 handshake is new protocol logic written in 2026. It was tested against OpenSSL, GnuTLS and Go (see [what was run](docs/testing.md)) and fuzzed, and that is all. Read [Security status](docs/explanation-security-status.md) before you use it for anything that matters.
 
-The upstream library is by Thomas Pornin ([bearssl.org](https://www.bearssl.org/)); its own notes are in [README.txt](README.txt). Everything that upstream did (TLS 1.0 to 1.2, the primitives, the X.509 engine) is unchanged.
+The upstream library is by Thomas Pornin ([bearssl.org](https://www.bearssl.org/)); its own notes are in [README.txt](README.txt). Everything that upstream did (TLS 1.0 to 1.2, the primitives, the X.509 engine) is there; one default differs: the full profiles no longer allow TLS 1.0 and 1.1 ([docs/upgrading.md](docs/upgrading.md)).
 
 ## When to use it, and when not
 

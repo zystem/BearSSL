@@ -3120,6 +3120,10 @@ br_ssl_client_get_server_curve(const br_ssl_client_context *cc)
  * and the provided trust anchors; the X.509 engine will be used by
  * the client context to validate the server's certificate.
  *
+ * The version is set to TLS 1.2. Upstream also allows TLS 1.0 and 1.1
+ * (deprecated by RFC 8996); a program that must talk to such a peer
+ * calls `br_ssl_engine_set_versions()`.
+ *
  * \param cc                  client context to initialise.
  * \param xc                  X.509 validation context to initialise.
  * \param trust_anchors       trust anchors to use.
@@ -3971,6 +3975,10 @@ struct br_ssl_server_context_ {
  * all supported algorithms and cipher suites that rely on a RSA
  * key pair.
  *
+ * The version is set to TLS 1.2. Upstream also allows TLS 1.0 and 1.1
+ * (deprecated by RFC 8996); a program that must talk to such a peer
+ * calls `br_ssl_engine_set_versions()`.
+ *
  * \param cc          server context to initialise.
  * \param chain       server certificate chain.
  * \param chain_len   certificate chain length (number of certificate).
@@ -3991,6 +3999,10 @@ void br_ssl_server_init_full_rsa(br_ssl_server_context *cc,
  * be provided, since it matters for ECDH cipher suites (ECDH_RSA
  * suites require a RSA-powered CA). The key type is either
  * `BR_KEYTYPE_RSA` or `BR_KEYTYPE_EC`.
+ *
+ * The version is set to TLS 1.2. Upstream also allows TLS 1.0 and 1.1
+ * (deprecated by RFC 8996); a program that must talk to such a peer
+ * calls `br_ssl_engine_set_versions()`.
  *
  * \param cc                     server context to initialise.
  * \param chain                  server certificate chain.
