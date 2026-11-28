@@ -50,9 +50,9 @@ In a TLS 1.3 connection (and, when TLS 1.3 is enabled, before the version is cho
 | `BR_ERR_BAD_MAC` | `bad_record_mac` (20); an authentic record with no content type is `unexpected_message`, one with too much content `record_overflow` |
 | `BR_ERR_UNEXPECTED`, `BR_ERR_UNKNOWN_TYPE`, `BR_ERR_BAD_CCS`, `BR_ERR_BAD_HELLO_DONE` | `unexpected_message` (10) |
 | `BR_ERR_TOO_LARGE` | `record_overflow` (22) |
-| `BR_ERR_BAD_PARAM`, `BR_ERR_BAD_LENGTH`, `BR_ERR_BAD_ALERT`, `BR_ERR_BAD_HANDSHAKE`, `BR_ERR_OVERSIZED_ID`, `BR_ERR_LIMIT_EXCEEDED` | `decode_error` (50); a KeyUpdate with an unknown request value is `illegal_parameter`, a record with a length over the limit `record_overflow` |
+| `BR_ERR_BAD_PARAM`, `BR_ERR_BAD_LENGTH`, `BR_ERR_BAD_ALERT`, `BR_ERR_BAD_HANDSHAKE`, `BR_ERR_OVERSIZED_ID`, `BR_ERR_LIMIT_EXCEEDED` | `decode_error` (50); a CertificateRequest without `signature_algorithms` is `missing_extension`, a KeyUpdate with an unknown request value is `illegal_parameter`, a record with a length over the limit `record_overflow` |
 | `BR_ERR_BAD_CIPHER_SUITE`, `BR_ERR_BAD_COMPRESSION`, `BR_ERR_BAD_FRAGLEN`, `BR_ERR_BAD_SECRENEG`, `BR_ERR_BAD_SNI`, `BR_ERR_RESUME_MISMATCH`, `BR_ERR_INVALID_ALGORITHM` | `illegal_parameter` (47) |
-| `BR_ERR_EXTRA_EXTENSION` | `unsupported_extension` (110) |
+| `BR_ERR_EXTRA_EXTENSION` | `unsupported_extension` (110); `illegal_parameter` for an extension of TLS 1.2 in a TLS 1.3 ServerHello, and for one of `signature_algorithms`, `pre_shared_key`, `supported_versions`, `cookie`, `psk_key_exchange_modes` or `key_share` in EncryptedExtensions |
 | `BR_ERR_BAD_FINISHED`, `BR_ERR_BAD_SIGNATURE` | `decrypt_error` (51); a Finished of a wrong length received by a server is `decode_error` |
 | `BR_ERR_BAD_VERSION`, `BR_ERR_UNSUPPORTED_VERSION` | `protocol_version` (70); the downgrade sentinel is `illegal_parameter` |
 | `BR_ERR_WRONG_KEY_USAGE` | `unsupported_certificate` (43) |
@@ -60,6 +60,10 @@ In a TLS 1.3 connection (and, when TLS 1.3 is enabled, before the version is cho
 | `BR_ERR_X509_EXPIRED`, `BR_ERR_X509_NOT_TRUSTED`, other `BR_ERR_X509_*` | `certificate_expired` (45), `unknown_ca` (48), `bad_certificate` (42) |
 | a record of type alert that is not protected when it must be | none |
 | a local failure (`BR_ERR_IO`, `BR_ERR_NO_RANDOM`, `BR_ERR_BAD_STATE`, `BR_ERR_KEY_LIMIT`), a closure, a received alert | none |
+
+A server also answers a TLS 1.3 ClientHello itself, before any key, with `protocol_version` when its `legacy_version` is not 0x0303, with `illegal_parameter` when it offers compression, and with `missing_extension` (109) when `signature_algorithms`, `supported_groups`, `key_share` or `psk_key_exchange_modes` is missing where [RFC 9846](https://www.rfc-editor.org/rfc/rfc9846.html) section 9.2 asks for it.
+
+**Alerts received** (TLS 1.3, once keys are in use): the level is not looked at. `close_notify` closes the connection, `user_canceled` is ignored, and every other alert, known or not, ends the connection with `BR_ERR_RECV_FATAL_ALERT` plus its number. TLS 1.2 and older behave as upstream: a warning is ignored.
 
 ## Keys of the records
 

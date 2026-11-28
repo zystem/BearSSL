@@ -4,6 +4,16 @@ Changes against upstream BearSSL `7bea48e`. Dates 2026. Versions are `X.Y.Z-tls1
 
 ## Unreleased
 
+### Changed (2026-11-28): TLS 1.0 and 1.1 are off by default
+- `br_ssl_client_init_full()`, `br_ssl_server_init_full_rsa()` and `br_ssl_server_init_full_ec()` set a minimum of TLS 1.2 (before, TLS 1.0, as upstream; RFC 8996 deprecates 1.0 and 1.1). A program that needs an older peer calls `br_ssl_engine_set_versions()` ([docs/upgrading.md](docs/upgrading.md)).
+- `brssl client`, `server` and `twrch` have `-vmin TLS-1.2` as the default; scripts that talk to older peers add `-vmin TLS-1.0`, also when they give only `-vmax`.
+
+### Changed (2026-11-28): requirements of RFC 9846 and RFC 8446 that were not met ([docs/rfc9846.md](docs/rfc9846.md))
+- TLS 1.3: an alert of level warning ends the connection like a fatal one; `user_canceled` is ignored at either level. A peer that sends warnings it expects to be ignored is now cut off.
+- Both roles refuse a message after a Finished in the same record, and the client one after a ServerHello (`unexpected_message`); the first was accepted before.
+- A server refuses a TLS 1.3 ClientHello with a `legacy_version` other than 0x0303, or without `supported_groups`, `signature_algorithms`, `key_share` or `psk_key_exchange_modes` where they are required; some of these were accepted before. Compression is `illegal_parameter`.
+- A client refuses an extension of TLS 1.2 in a TLS 1.3 ServerHello, which it accepted before.
+
 ### Changed (2026-11-27): TLS 1.3 errors are told to the peer
 - In both roles a TLS 1.3 connection that fails because of what the peer sent now sends a fatal alert (before, most failures closed the transport in silence). The error is set while the state is still `BR_SSL_SENDREC`; the engine is closed once the alert has been taken ([docs/reference-api.md](docs/reference-api.md), "Alerts on errors"). A program that treats a set error as "closed" keeps working and sends no alert. TLS 1.2 and older are not changed. The context has four more bytes of state: rebuild dependent code.
 - A server and a client now refuse (`unexpected_message`) application data in the middle of a message sent after the handshake, and data after a KeyUpdate in the same record (RFC 8446 section 5.1); both were accepted before.

@@ -4,7 +4,7 @@
 
 ## Why it is not on already
 
-The profile functions (`br_ssl_client_init_full()`, `br_ssl_server_init_full_ec()`, `br_ssl_server_init_full_rsa()`, and the smaller ones) set versions TLS 1.0 to 1.2 and a list of TLS 1.2 suites, as upstream does. A program built before this fork behaves as before. You ask for TLS 1.3 yourself.
+The profile functions (`br_ssl_client_init_full()`, `br_ssl_server_init_full_ec()`, `br_ssl_server_init_full_rsa()`, and the smaller ones) set version TLS 1.2 and a list of TLS 1.2 suites. (Upstream's full profiles also allow TLS 1.0 and 1.1; this fork does not, [upgrading.md](upgrading.md).) You ask for TLS 1.3 yourself.
 
 ## Steps
 

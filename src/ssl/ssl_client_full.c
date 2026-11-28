@@ -114,11 +114,12 @@ br_ssl_client_init_full(br_ssl_client_context *cc,
 	int id;
 
 	/*
-	 * Reset client context and set supported versions from TLS-1.0
-	 * to TLS-1.2 (inclusive).
+	 * Reset client context and set the supported version to TLS-1.2
+	 * (upstream also allows TLS-1.0 and 1.1, which RFC 8996
+	 * deprecates; br_ssl_engine_set_versions() brings them back).
 	 */
 	br_ssl_client_zero(cc);
-	br_ssl_engine_set_versions(&cc->eng, BR_TLS10, BR_TLS12);
+	br_ssl_engine_set_versions(&cc->eng, BR_TLS12, BR_TLS12);
 
 	/*
 	 * X.509 engine uses SHA-256 to hash certificate DN (for

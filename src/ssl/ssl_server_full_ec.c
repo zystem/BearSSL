@@ -93,11 +93,12 @@ br_ssl_server_init_full_ec(br_ssl_server_context *cc,
 	int id;
 
 	/*
-	 * Reset server context and set supported versions from TLS-1.0
-	 * to TLS-1.2 (inclusive).
+	 * Reset server context and set the supported version to TLS-1.2
+	 * (upstream also allows TLS-1.0 and 1.1, which RFC 8996
+	 * deprecates; br_ssl_engine_set_versions() brings them back).
 	 */
 	br_ssl_server_zero(cc);
-	br_ssl_engine_set_versions(&cc->eng, BR_TLS10, BR_TLS12);
+	br_ssl_engine_set_versions(&cc->eng, BR_TLS12, BR_TLS12);
 
 	/*
 	 * Set suites and elliptic curve implementation (for ECDHE).

@@ -30,6 +30,8 @@ The 1075 that still fail are, as far as they were looked at:
 
 The silent close is how upstream BearSSL treats most errors, in TLS 1.2 as well: it fails the connection and sends an alert only in some cases ([../inc/bearssl_ssl.h](../inc/bearssl_ssl.h), `BR_ERR_SEND_FATAL_ALERT`). RFC 8446 says which alert to send in many of these cases. Sending them everywhere would change a design choice of the library, in particular for the record layer (a bad tag, an empty record, a record that is too long), where the engine cannot write a record once it has failed. This was **not** done. It is the largest group of failures and the first thing to decide if the fork should be strict.
 
+RFC 9846 has since replaced RFC 8446 and asks for the alert on `legacy_version` that the table above calls a difference: [rfc9846.md](rfc9846.md).
+
 The table and the paragraph above are the state of 2026-11-21. What changed with the alerts:
 
 ## Alerts for errors (2026-11-27)
@@ -54,7 +56,7 @@ Seen in what still fails and **not changed**: a ChangeCipherSpec after the hands
 | tlsfuzzer `ecdhe-curves`; [OpenSSL #33460](https://github.com/openssl/openssl/issues/33460); the review of 2026-11-21 | The server accepted an X25519 key share that is a point of small order (the shared secret is all zero, RFC 8446 section 7.4.2), and a key share with a point not on the curve or of a wrong length, and failed only after it had sent its ServerHello | The shared secret is computed and checked **before** the ServerHello (`br_ssl_engine_tls13_srv_ecdh`); a zero X25519 secret, an invalid point and a share of a wrong length end with `illegal_parameter`. The client checks the zero secret too |
 | tlsfuzzer `hrr`, `no-unknown-groups` | After a HelloRetryRequest the server sent its ChangeCipherSpec after the ServerHello, not after the first message (RFC 8446 appendix D.4) | The ChangeCipherSpec follows the HelloRetryRequest, not the ServerHello (found while testing: the record type must be reset to Handshake after it, or OpenSSL stops with "invalid ccs message") |
 | tlsfuzzer `finished`; [picotls #605](https://github.com/h2o/picotls/issues/605) | A wrong or too long Finished, or a message of the wrong type in the client's flight, closed the connection with no alert | `decrypt_error`, `decode_error` and `unexpected_message` are sent (the status of the engine is still `BR_ERR_BAD_FINISHED` or `BR_ERR_UNEXPECTED`) |
-| tlsfuzzer `empty-alert`; [picotls #605](https://github.com/h2o/picotls/issues/605) | A TLS 1.3 Handshake or Alert record with no content was skipped; the engine then waited for more | It fails with `BR_ERR_UNEXPECTED` (still without an alert: see above) |
+| tlsfuzzer `empty-alert`; [picotls #605](https://github.com/h2o/picotls/issues/605) | A TLS 1.3 Handshake or Alert record with no content was skipped; the engine then waited for more | It fails with `BR_ERR_UNEXPECTED` (on 2026-11-21 without an alert; since 2026-11-27 with one) |
 
 ## Fixed because of the review of 2026-11-21
 
@@ -92,7 +94,7 @@ A second review of the release `0.6.1-tls13.0` plus the fixes, revision `1740f68
 | 4. One error return skipped the wipe of the local copy of the shared secret | One exit for every path after the copy | by reading; the error cannot be made to happen in a test without a faulty hash table. The object code of the release was not inspected |
 | 5. Alerts, the excluded probes, the interop harness | The interop script keeps and prints the logs of a failed case, waits for a port to listen instead of fixed pauses (three clean runs of the 46 cases afterwards; the earlier failures were not reproduced, so the cause is not known), and the exclusion of the four `finished` probes has an owner and an expiry date after which `run.sh` fails; `style_check.sh` fails if a build file or the release workflow sets `BR_TLS13_FUZZ`; the refusal tests (`TLS13_TAMPER`) run on the build that is released | the scripts. **Not done then:** an alert for every TLS 1.3 error in both roles (done on 2026-11-27, see "Alerts for errors"); the 1.2 parser is not exercised apart from 1.3 |
 
-The review also notes that RFC 9846 has replaced RFC 8446: a claim of conformance to the current specification needs a mapping to it, which was **not made**.
+The review also notes that RFC 9846 has replaced RFC 8446: a claim of conformance to the current specification needs a mapping to it. It was made on 2026-11-28; what it found, what was changed and what is still not met: [rfc9846.md](rfc9846.md). With those changes the tlsfuzzer scripts `legacy-version` and `keyshare-omitted` pass in full and are in the gate.
 
 ### Checked afterwards (2026-11-21, Linux x86-64, gcc 13.3, `vm.mmap_rnd_bits` 28)
 
@@ -106,17 +108,17 @@ The review also notes that RFC 9846 has replaced RFC 8446: a claim of conformanc
 
 | Project and issue | Problem | Here |
 |---|---|---|
-| picotls [#605](https://github.com/h2o/picotls/issues/605) | A second HelloRetryRequest is not refused | Refused (`BR_ERR_UNEXPECTED`; test "hrr: a second one is refused" in `test/test_crypto.c`), without an alert |
+| picotls [#605](https://github.com/h2o/picotls/issues/605) | A second HelloRetryRequest is not refused | Refused (`BR_ERR_UNEXPECTED`; test "hrr: a second one is refused" in `test/test_crypto.c`) (the alert is sent since 2026-11-27) |
 | picotls #605, wolfSSL [#10016](https://github.com/wolfSSL/wolfssl/issues/10016) | The cipher suite of the ServerHello after a HelloRetryRequest is not compared with that of the HelloRetryRequest | Compared (`ssl_hs_client.t0`, "After a HelloRetryRequest the suite must be the same") |
 | picotls #605 | The HelloRetryRequest asks for a group that the client already sent | Refused (`BR_ERR_BAD_PARAM`; test "hrr: same group as our share") |
 | picotls #605 | Zero-length Handshake or Alert record accepted | Fixed above |
-| picotls #605, [#594](https://github.com/h2o/picotls/issues/594) | Wrong alert for a bad Finished, a bad ChangeCipherSpec, a record that is too long, an empty Certificate | Bad Finished: fixed above. The others: closed without an alert (see above); not looked at one by one |
-| wolfSSL [#10320](https://github.com/wolfSSL/wolfssl/issues/10320), [#10321](https://github.com/wolfSSL/wolfssl/issues/10321) | An extension in the HelloRetryRequest or ServerHello that the client did not offer is accepted | Refused: the client reads extensions with a fixed list and fails on any other (`BR_ERR_EXTRA_EXTENSION`), without an alert |
-| wolfSSL [#10746](https://github.com/wolfSSL/wolfssl/issues/10746) | A HelloRetryRequest without `supported_versions`: wrong alert, and two alerts | Not tested here (the client sends no alert, so it cannot send two) |
+| picotls #605, [#594](https://github.com/h2o/picotls/issues/594) | Wrong alert for a bad Finished, a bad ChangeCipherSpec, a record that is too long, an empty Certificate | Bad Finished: fixed above. The others were closed without an alert; since 2026-11-27 an alert is sent ([Alerts for errors](#alerts-for-errors-2026-11-27)), but these cases were not looked at one by one |
+| wolfSSL [#10320](https://github.com/wolfSSL/wolfssl/issues/10320), [#10321](https://github.com/wolfSSL/wolfssl/issues/10321) | An extension in the HelloRetryRequest or ServerHello that the client did not offer is accepted | Refused: the client reads extensions with a fixed list and fails on any other (`BR_ERR_EXTRA_EXTENSION`), with an alert since 2026-11-27 |
+| wolfSSL [#10746](https://github.com/wolfSSL/wolfssl/issues/10746) | A HelloRetryRequest without `supported_versions`: wrong alert, and two alerts | Not tested here (by reading: the client sends one alert, the engine writes no second one) |
 | wolfSSL [#10195](https://github.com/wolfSSL/wolfssl/issues/10195) | A server tells "no such PSK identity" from "wrong binder" | Does not apply as it was reported: an unknown ticket gives a full handshake, a wrong binder gives `decrypt_error`; a ticket is a random 32-byte identifier, so the difference tells an attacker nothing they can use. PSK-only mode does not exist here |
 | wolfSSL [#10197](https://github.com/wolfSSL/wolfssl/issues/10197), rustls [#3311](https://github.com/rustls/rustls/issues/3311) | 0-RTT replay and early data with the wrong PSK | Does not apply: there is no 0-RTT |
 | rustls [#3308](https://github.com/rustls/rustls/issues/3308), [#3310](https://github.com/rustls/rustls/issues/3310), [#2709](https://github.com/rustls/rustls/issues/2709) | A session of one policy is used with another; keys of long-lived connections are not changed | Fixed (see the next section): a policy identifier and the client-authentication state are stored with each session, and the engine changes its sending key before the limit of the cipher |
-| rustls [#3313](https://github.com/rustls/rustls/pull/3313), [#3315](https://github.com/rustls/rustls/pull/3315) | Encrypting beyond the limits of the cipher; encrypting after a fatal alert | Not looked at (the engine does not write after it has failed) |
+| rustls [#3313](https://github.com/rustls/rustls/pull/3313), [#3315](https://github.com/rustls/rustls/pull/3315) | Encrypting beyond the limits of the cipher; encrypting after a fatal alert | Not looked at (by reading: after it has failed the engine writes at most the one fatal alert, since 2026-11-27) |
 | OpenSSL [#33460](https://github.com/openssl/openssl/issues/33460) | The all-zero check of X25519 skipped on one code path | We had no such check at all: fixed above |
 
 ## Ideas not taken, for later

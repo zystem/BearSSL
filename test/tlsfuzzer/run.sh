@@ -17,7 +17,7 @@
 TLSFUZZER=51aad6e9ae42f5b045fa9b76129fe0746631784d
 TLSLITE=7e95ea1a86c0d42d8d931ff14134d31f01ce1d76
 PORT=${PORT:-14433}
-GATE="conversation count-tickets finished hrr invalid-ciphers large-number-of-extensions lengths nociphers pkcs-signature record-padding rsa-signatures unencrypted-alert ecdhe-curves keyupdate record-layer-limits empty-alert finished-plaintext"
+GATE="conversation count-tickets finished hrr invalid-ciphers large-number-of-extensions lengths nociphers pkcs-signature record-padding rsa-signatures unencrypted-alert ecdhe-curves keyupdate record-layer-limits empty-alert finished-plaintext legacy-version keyshare-omitted"
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
