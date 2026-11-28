@@ -83,6 +83,8 @@ Run on 2026-11-28 after the changes for [RFC 9846](rfc9846.md), Linux x86-64: `t
 
 Run on 2026-11-28 after the changes to ChangeCipherSpec, record versions and the empty list ([conformance.md](conformance.md)), Linux x86-64: `testcrypto all` and `testx509`, also under AddressSanitizer + UndefinedBehaviorSanitizer (clang 18, exit 0); the new checks were seen to fail with each of five changes taken out; `interop_openssl13.sh`; `interop_server13.sh`, 46 cases; `tlsfuzzer/run.sh` three times (ok); both fuzz targets for 2 minutes with 4 workers each (no artifact).
 
+Run on 2026-11-28 after the change to the tlsfuzzer test server ([conformance.md](conformance.md)), Linux x86-64: all 714 probes of `finished` 8 times, and 3 times on one core; the gate (ok, 109 s); every probe of every script of the gate once (ok, 530 s). The library was not changed.
+
 ## Fuzzing
 
 libFuzzer (clang 18, ASan + UBSan), client and server engines, build flag `BR_TLS13_FUZZ` (cryptographic checks off), seeds made by running a client and a server against each other (`test/fuzz`). A 10-minute trial run of about 4.5 million executions found no crash. The seed generator found a real bug (HelloRetryRequest with `renegotiation_info`), now fixed. **The 24 hour runs of 2026-11-20 and what they were** (read on 2026-11-21 16:00 from the machines; code of commit `e7a3fe6` for the first two and `f08786e` for the third, both before the fixes of [conformance.md](conformance.md)):
