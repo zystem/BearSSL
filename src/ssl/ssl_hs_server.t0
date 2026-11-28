@@ -511,10 +511,19 @@ cc: set-max-frag-len ( len -- ) {
 		ERR_BAD_SECRENEG fail
 	endcase ;
 
+\ Set a bit of tls13_neg: 1 TLS 1.3 is offered, 2 psk_dhe_ke is accepted;
+\ then the extensions that were seen: 4 supported_groups, 8
+\ signature_algorithms, 16 key_share, 32 pre_shared_key, 64
+\ psk_key_exchange_modes; 128: the list of signature_algorithms is empty.
+: neg-bit ( bit -- )
+	addr-tls13_neg get8 or addr-tls13_neg set8 ;
+
 \ Read the Signature Algorithms extension.
 : read-signatures ( lim -- lim )
 	\ Open extension value.
 	read16 open-elt
+	\ (only the length of the list: it is empty)
+	dup 2 = if 128 neg-bit then
 
 	read-list-sign-algos addr-hashes set32
 
@@ -724,13 +733,6 @@ cc: tls13-srv-make-ticket ( -- len ) {
 	T0_PUSH((uint32_t)br_ssl_server_tls13_make_ticket(CTX));
 }
 
-\ Set a bit of tls13_neg: 1 TLS 1.3 is offered, 2 psk_dhe_ke is accepted;
-\ then the extensions that were seen: 4 supported_groups, 8
-\ signature_algorithms, 16 key_share, 32 pre_shared_key, 64
-\ psk_key_exchange_modes.
-: neg-bit ( bit -- )
-	addr-tls13_neg get8 or addr-tls13_neg set8 ;
-
 \ Read the psk_key_exchange_modes extension: bit 1 of tls13_neg is set if
 \ the client accepts psk_dhe_ke (the only mode that we use).
 : read-client-pskmodes ( lim -- lim )
@@ -849,6 +851,8 @@ cc: tls13-srv-make-ticket ( -- len ) {
 	exts 32 and 0= exts 12 and 12 <> and if 109 fail-alert then
 	exts 4 and 0<> exts 16 and 0<> <> if 109 fail-alert then
 	exts 32 and 0<> exts 64 and 0= and if 109 fail-alert then
+	\ A list of signature algorithms must not be empty.
+	exts 128 and if 50 fail-alert then
 	\ ALPN first, as with TLS 1.2: a refusal is reported before the policy
 	\ handler is called.
 	addr-selected_protocol get16 0xFFFF = if

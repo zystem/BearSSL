@@ -25,7 +25,9 @@
 /*
  * Server for the tlsfuzzer scripts (test/tlsfuzzer/run.sh). It is
  * samples/server_basic.c with three changes: it echoes the application data
- * until the peer closes (tlsfuzzer expects that), it serves each connection
+ * until the peer closes (tlsfuzzer expects that; it answers only when what
+ * it has read ends with a newline, as an HTTP server would wait for the end
+ * of a request: several scripts send a line in pieces), it serves each connection
  * in a child process (a script that leaves a connection hanging must not
  * stop the next test), and it stops a child after 120 s. The server key and
  * certificate chain are the sample ones (samples/chain-*.h): tlsfuzzer does
@@ -421,16 +423,20 @@ main(int argc, char *argv[])
 		 */
 		br_sslio_init(&ioc, &sc.eng, sock_read, &cfd, sock_write, &cfd);
 
-		/* test server: echo the application data until the peer closes */
 		for (;;) {
 			unsigned char x[16384];
+			size_t have = 0;
 			int n;
 
-			n = br_sslio_read(&ioc, x, sizeof x);
-			if (n < 0) {
-				goto client_drop;
-			}
-			if (br_sslio_write_all(&ioc, x, n) < 0
+			/* answer only when the data ends with a newline */
+			do {
+				n = br_sslio_read(&ioc, x + have, sizeof x - have);
+				if (n < 0) {
+					goto client_drop;
+				}
+				have += n;
+			} while (have < sizeof x && x[have - 1] != '\n');
+			if (br_sslio_write_all(&ioc, x, have) < 0
 				|| br_sslio_flush(&ioc) < 0)
 			{
 				goto client_drop;

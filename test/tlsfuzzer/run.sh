@@ -17,7 +17,7 @@
 TLSFUZZER=51aad6e9ae42f5b045fa9b76129fe0746631784d
 TLSLITE=7e95ea1a86c0d42d8d931ff14134d31f01ce1d76
 PORT=${PORT:-14433}
-GATE="conversation count-tickets finished hrr invalid-ciphers large-number-of-extensions lengths nociphers pkcs-signature record-padding rsa-signatures unencrypted-alert ecdhe-curves keyupdate record-layer-limits empty-alert finished-plaintext legacy-version keyshare-omitted"
+GATE="conversation count-tickets finished hrr invalid-ciphers large-number-of-extensions lengths nociphers pkcs-signature record-padding rsa-signatures unencrypted-alert ecdhe-curves keyupdate record-layer-limits empty-alert finished-plaintext legacy-version keyshare-omitted ccs zero-content-type signature-algorithms multiple-ccs-messages"
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
@@ -89,11 +89,13 @@ for n in $GATE; do
 			-e "padding - cipher TLS_AES_256_GCM_SHA384, pad_byte 0, pad_left 0, pad_right 196608" \
 			-e "padding - cipher TLS_AES_128_GCM_SHA256, pad_byte 0, pad_left 0, pad_right 16777183" \
 			-e "padding - cipher TLS_AES_256_GCM_SHA384, pad_byte 0, pad_left 0, pad_right 16777167" || fail=1
-	elif [ $n = keyupdate ]; then
-		# This probe sends a line in two pieces around a KeyUpdate and
-		# wants one answer; the test server echoes what it has read, so
-		# now and then it answers the first piece alone.
-		run $n -e "app data split, conversation with KeyUpdate msg" || fail=1
+	elif [ $n = multiple-ccs-messages ]; then
+		# These probes want an alert for a second ChangeCipherSpec
+		# before the Finished. RFC 9846, section 5, says to drop every
+		# one of them, which is what the server does.
+		run $n -x "second CCS before client finished" \
+			-x "multiple CCS Messages in one TCP packet" \
+			-x "CH and multiple CCS Messages in one TCP packet" || fail=1
 	else
 		run $n || fail=1
 	fi

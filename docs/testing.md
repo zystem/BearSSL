@@ -15,7 +15,7 @@ Linux 6.8 x86-64, gcc 13.3 and clang 18, OpenSSL 3.0.13, GnuTLS (`gnutls-cli`/`g
 | `TLS13_HS`, `TLS13_REPLAY` | client handshake against RFC 8448 (client side replayed byte for byte) | same |
 | `TLS13_HRR` | RFC 8448 HelloRetryRequest trace, refusals, downgrade sentinels | same |
 | `TLS13_LOOPBACK` | client against server in one process: 3 suites, with and without client authentication, with HelloRetryRequest, resumption (full, resumed, resumed again, forgotten ticket, wrong PSK) | same |
-| `TLS13_ALERTS` | the alert that an engine sends for an error, in both roles, before and after the keys; none without TLS 1.3; the state while the alert waits; a KeyUpdate in pieces, with data in the middle, twice in one record, with a bad value; since 2026-11-28 also the level of a received alert, ClientHello messages that must be refused, messages after a ServerHello or a Finished in the same record, extensions out of place, the minimum version of the full profiles | 2026-11-27 |
+| `TLS13_ALERTS` | the alert that an engine sends for an error, in both roles, before and after the keys; none without TLS 1.3; the state while the alert waits; a KeyUpdate in pieces, with data in the middle, twice in one record, with a bad value; since 2026-11-28 also the level of a received alert, ClientHello messages that must be refused, messages after a ServerHello or a Finished in the same record, extensions out of place, the minimum version of the full profiles, ChangeCipherSpec records (when they are dropped and refused, also after a reset) and an empty list of signature algorithms | 2026-11-27 |
 
 A test of the client against the server cannot find a label that both sides get wrong; the independent peers below did that job.
 
@@ -81,6 +81,8 @@ Run on 2026-11-27 after the alerts for TLS 1.3 errors ([conformance.md](conforma
 
 Run on 2026-11-28 after the changes for [RFC 9846](rfc9846.md), Linux x86-64: `testcrypto all` and `testx509`, also under AddressSanitizer + UndefinedBehaviorSanitizer (clang 18, exit 0); the new checks of `TLS13_ALERTS` were seen to fail with each of five changes taken out; `interop_openssl13.sh`; `interop_server13.sh`, 46 cases; `tlsfuzzer/run.sh` three times (ok); all 57 tlsfuzzer scripts, 2162 probes passed and 765 failed (2149 and 778 on `master` the same day; the totals vary between runs, see [conformance.md](conformance.md)); both fuzz targets for 2 minutes with 4 workers each (no artifact). Not run: the client against tlsfuzzer; a long fuzz run of this code.
 
+Run on 2026-11-28 after the changes to ChangeCipherSpec, record versions and the empty list ([conformance.md](conformance.md)), Linux x86-64: `testcrypto all` and `testx509`, also under AddressSanitizer + UndefinedBehaviorSanitizer (clang 18, exit 0); the new checks were seen to fail with each of five changes taken out; `interop_openssl13.sh`; `interop_server13.sh`, 46 cases; `tlsfuzzer/run.sh` three times (ok); both fuzz targets for 2 minutes with 4 workers each (no artifact).
+
 ## Fuzzing
 
 libFuzzer (clang 18, ASan + UBSan), client and server engines, build flag `BR_TLS13_FUZZ` (cryptographic checks off), seeds made by running a client and a server against each other (`test/fuzz`). A 10-minute trial run of about 4.5 million executions found no crash. The seed generator found a real bug (HelloRetryRequest with `renegotiation_info`), now fixed. **The 24 hour runs of 2026-11-20 and what they were** (read on 2026-11-21 16:00 from the machines; code of commit `e7a3fe6` for the first two and `f08786e` for the third, both before the fixes of [conformance.md](conformance.md)):
@@ -110,7 +112,7 @@ The same commit `8af7ae2` broke the seed generator (`test/fuzz/mkseeds.sh` stopp
 
 All workers of both runs ran their full time; no line of a sanitizer error is in their logs. The first run began with 16 new seeds per target and the corpus of the run of `0fa53ee`; the second with 16 new seeds and a copy of the first one's corpus, taken while it ran. From 02:03 to 23:32 on 2026-11-27 the two runs shared the machine (24 workers on 24 threads, beside the virtual machines). The coverage figures are of different code and do not compare.
 
-**Neither run covers the changes of 2026-11-28** ([rfc9846.md](rfc9846.md): alert levels, record boundaries, checks of the ClientHello and of extensions); those had 2 minutes of fuzzing (above).
+**Neither run covers the changes of 2026-11-28** ([rfc9846.md](rfc9846.md): alert levels, record boundaries, checks of the ClientHello and of extensions); those, and the ChangeCipherSpec changes made later that day, had 2 minutes of fuzzing (above).
 
 ## Size and speed (2026-11-20, one machine)
 

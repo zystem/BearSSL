@@ -4,6 +4,12 @@ Changes against upstream BearSSL `7bea48e`. Dates 2026. Versions are `X.Y.Z-tls1
 
 ## Unreleased
 
+### Fixed (2026-11-28, found with tlsfuzzer: [docs/conformance.md](docs/conformance.md))
+- TLS 1.3: a ChangeCipherSpec after the peer's handshake, or a protected one, is refused (`unexpected_message`); it was ignored.
+- TLS 1.3: the version of an unprotected record is ignored. A peer that sent ChangeCipherSpec right after its ClientHello, with the version of that record, was refused with `protocol_version`.
+- A server answers an empty list of signature algorithms with `decode_error`.
+- `br_ssl_engine_hs_reset()` clears the TLS 1.3 role mark of the connection before.
+
 ### Changed (2026-11-28): TLS 1.0 and 1.1 are off by default
 - `br_ssl_client_init_full()`, `br_ssl_server_init_full_rsa()` and `br_ssl_server_init_full_ec()` set a minimum of TLS 1.2 (before, TLS 1.0, as upstream; RFC 8996 deprecates 1.0 and 1.1). A program that needs an older peer calls `br_ssl_engine_set_versions()` ([docs/upgrading.md](docs/upgrading.md)).
 - `brssl client`, `server` and `twrch` have `-vmin TLS-1.2` as the default; scripts that talk to older peers add `-vmin TLS-1.0`, also when they give only `-vmax`.
